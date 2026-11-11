@@ -1,0 +1,24 @@
+name: Feature request
+description: Suggest a feature or workflow improvement
+title: "[FEATURE] "
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What should become easier?
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: Desired behavior
+    validations:
+      required: true
+  - type: textarea
+    id: ui
+    attributes:
+      label: UI / workflow idea
+  - type: textarea
+    id: notes
+    attributes:
+      label: Notes
