@@ -6,9 +6,9 @@ This file is the shared assignment board for the three-person ChatGPT developmen
 
 | Team | Human | Role | Active assignment |
 |---|---|---|---|
-| A | Repository owner | Integration coordinator + implementation | See Team A Issue |
-| B | Friend 1 | Parallel implementation | See Team B Issue |
-| C | Friend 2 | Parallel implementation | See Team C Issue |
+| A | Repository owner | Integration coordinator + implementation | [Issue #2](https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/2) |
+| B | Friend 1 | Parallel implementation | [Issue #3](https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/3) |
+| C | Friend 2 | Parallel implementation | [Issue #4](https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/4) |
 
 ## Mandatory read order
 
@@ -55,11 +55,14 @@ The authoritative current task for each team is its dedicated GitHub Issue.
 This file defines the process; Team A updates the issues as assignments rotate.
 
 ### Team A
+Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/2
 Status: ACTIVE  
 Purpose: integration, dispatch, current baseline maintenance, plus explicitly assigned implementation.
 
 ### Team B
+Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/3
 Status: IDLE until its Team Issue contains an ASSIGNED task.
 
 ### Team C
+Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/4
 Status: IDLE until its Team Issue contains an ASSIGNED task.
