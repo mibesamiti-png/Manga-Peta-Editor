@@ -61,8 +61,10 @@ Purpose: integration, dispatch, current baseline maintenance, plus explicitly as
 
 ### Team B
 Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/3
-Status: IDLE until its Team Issue contains an ASSIGNED task.
+Status: ASSIGNED
+Assignment: one user-test/code-review driven improvement cycle. Choose one non-overlapping improvement, implement/test it, and submit reasoning + PR to Team A.
 
 ### Team C
 Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/4
-Status: IDLE until its Team Issue contains an ASSIGNED task.
+Status: ASSIGNED
+Assignment: one user-test/code-review driven improvement cycle. Choose one non-overlapping improvement, implement/test it, and submit reasoning + PR to Team A.
