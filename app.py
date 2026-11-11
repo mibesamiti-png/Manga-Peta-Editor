@@ -997,7 +997,8 @@ class BubbleItem(QGraphicsPathItem):
         if self.style == "rect":
             p.addRoundedRect(QRectF(0, 0, w, h), 24, 24)
             p.moveTo(w*0.30, h*0.94)
-            p.lineTo(self.tail_tip)            p.lineTo(w*0.48, h*0.94)
+            p.lineTo(self.tail_tip)
+            p.lineTo(w*0.48, h*0.94)
             p.closeSubpath()
         elif self.style == "thought":
             p.addEllipse(QRectF(0, 0, w, h))
@@ -1996,7 +1997,8 @@ class CanvasView(QGraphicsView):
         candidates = [i for i in self.scene().items(scene_pos) if i.parentItem() is None and i.isVisible()]
         if mode == "effect":
             for i in candidates:
-                if isinstance(i, ImageItem):                    return i
+                if isinstance(i, ImageItem):
+                    return i
             for i in candidates:
                 if isinstance(i, PanelItem) and i.image_path:
                     return i
@@ -2995,7 +2997,8 @@ class PanelDetailDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         box.accepted.connect(self.accept)
-        box.rejected.connect(self.reject)        lay.addWidget(box)
+        box.rejected.connect(self.reject)
+        lay.addWidget(box)
         root.addWidget(side)
 
         self.refresh_materials()
@@ -3994,7 +3997,8 @@ class MangaEditor(QMainWindow):
             if shortcut:
                 if isinstance(shortcut, (list, tuple)):
                     act.setShortcuts([QKeySequence(x) for x in shortcut])
-                else:                    act.setShortcut(QKeySequence(shortcut))
+                else:
+                    act.setShortcut(QKeySequence(shortcut))
             act.triggered.connect(slot)
             self.toolbar.addAction(act)
             return act
@@ -4993,7 +4997,8 @@ class MangaEditor(QMainWindow):
 
     def refresh_effect_asset_browser(self):
         if not hasattr(self, "effect_category_combo"):
-            return        self.effect_assets_cache = self.scan_effect_assets()
+            return
+        self.effect_assets_cache = self.scan_effect_assets()
         categories = sorted({a["category"] for a in self.effect_assets_cache})
         old_category = self.effect_category_combo.currentText()
         self.effect_category_combo.blockSignals(True)
@@ -5992,7 +5997,8 @@ class MangaEditor(QMainWindow):
             self.pages.pop(row)
             self.page_list.takeItem(row)
             new_row = min(row, len(self.pages)-1)
-            self._refresh_page_list_labels()            self.page_list.setCurrentRow(new_row)
+            self._refresh_page_list_labels()
+            self.page_list.setCurrentRow(new_row)
         finally:
             self.page_list.blockSignals(previous_block)
 
@@ -6991,7 +6997,8 @@ class MangaEditor(QMainWindow):
     def selection_changed(self):
         items = self.selected()
         if not items:
-            if hasattr(self, "selection_info_label"):                self.selection_info_label.setText("選択: なし")
+            if hasattr(self, "selection_info_label"):
+                self.selection_info_label.setText("選択: なし")
             if hasattr(self, "corner_edit_button"):
                 self.corner_edit_button.blockSignals(True)
                 self.corner_edit_button.setChecked(False)
@@ -7991,6 +7998,7 @@ class MangaEditor(QMainWindow):
                     key = "image_path"
                 if not key or not item.get(key):
                     continue
+
                 original = str(item.get(key))
                 rel_name, absolute_dest = self._copy_asset_to_project(
                     original, assets_dir
