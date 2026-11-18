@@ -2253,7 +2253,38 @@ class CanvasView(QGraphicsView):
         if self.region_mosaic_mode and event.key() == Qt.Key_Escape:
             self.cancel_region_mosaic()
             self.window().statusBar().showMessage("範囲モザイクをキャンセルしました", 2500)
+            event.accept()
             return
+
+        # Stage B0 of the Blender-style panel workflow. Canvas-only
+        # shortcuts must never intercept typing inside an editable text item.
+        scene = self.scene()
+        focused = scene.focusItem() if scene is not None else None
+        editing_text = (
+            isinstance(focused, QGraphicsTextItem)
+            and bool(focused.textInteractionFlags() & Qt.TextEditorInteraction)
+        )
+        if (
+            not self.region_mosaic_mode
+            and not editing_text
+            and not event.isAutoRepeat()
+            and event.modifiers() == Qt.ShiftModifier
+        ):
+            editor = self.window()
+            if event.key() == Qt.Key_A and hasattr(editor, "add_free_panel"):
+                editor.add_free_panel()
+                editor.statusBar().showMessage("Shift+A: 空のコマを追加しました", 2200)
+                event.accept()
+                return
+            if (
+                event.key() == Qt.Key_D
+                and hasattr(editor, "duplicate_selected_panels")
+                and editor.duplicate_selected_panels()
+            ):
+                editor.statusBar().showMessage("Shift+D: 選択コマを複製しました", 2200)
+                event.accept()
+                return
+
         super().keyPressEvent(event)
 
 
@@ -4319,7 +4350,8 @@ class MangaEditor(QMainWindow):
         corner_lay.addWidget(QLabel(
             "コマを選択 → Tabで四隅編集ON/OFF → ○をドラッグ。\n"
             "Ctrl+○クリック=複数頂点 / Shift+辺クリック=辺の2頂点を選択。\n"
-            "選択中の頂点・辺はオレンジ。"
+            "選択中の頂点・辺はオレンジ。\n"
+            "キャンバス上でShift+A=空コマ追加 / Shift+D=選択コマ複製。"
         ))
         panel_lay.addWidget(corner_box)
 
@@ -7661,6 +7693,34 @@ class MangaEditor(QMainWindow):
 
     def duplicate_selection(self):
         self.copy_selection(); self.paste_selection()
+
+    def duplicate_selected_panels(self):
+        """Duplicate only selected panels, preserving payload but not effect identity.
+
+        The existing Ctrl+D continues to duplicate arbitrary selected items.
+        This new method intentionally does not change the shared clipboard.
+        """
+        scene = self.current_scene()
+        if scene is None:
+            return False
+        panels = [
+            item for item in self.selected()
+            if isinstance(item, PanelItem) and item.parentItem() is None
+        ]
+        if not panels:
+            return False
+
+        payload = json.loads(json.dumps([p.serialize() for p in panels]))
+        # deserialize_scene treats a non-None offset as a paste, giving fresh
+        # effect_uids to the copies while retaining images and effect settings.
+        made = self.deserialize_scene(scene, payload, QPointF(35, 35))
+        if not made:
+            return False
+        scene.clearSelection()
+        for item in made:
+            item.setSelected(True)
+        self.record_history()
+        return True
 
     def show_debug_checklist(self):
         text = """Manga Peta Editor v1.8.4-debug 現役デバッグリスト

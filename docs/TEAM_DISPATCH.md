@@ -57,14 +57,12 @@ This file defines the process; Team A updates the issues as assignments rotate.
 ### Team A
 Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/2
 Status: ACTIVE  
-Purpose: integration, dispatch, current baseline maintenance, plus explicitly assigned implementation.
+Purpose: integration, baseline maintenance and active Issue #5 (Blender-style panel editing, PR #6).
 
 ### Team B
 Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/3
-Status: ASSIGNED
-Assignment: one user-test/code-review driven improvement cycle. Choose one non-overlapping improvement, implement/test it, and submit reasoning + PR to Team A.
+Status: IDLE — collaboration paused. No active assignment.
 
 ### Team C
 Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/4
-Status: ASSIGNED
-Assignment: one user-test/code-review driven improvement cycle. Choose one non-overlapping improvement, implement/test it, and submit reasoning + PR to Team A.
+Status: IDLE — collaboration paused. No active assignment.

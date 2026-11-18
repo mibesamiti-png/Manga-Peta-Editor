@@ -1,5 +1,13 @@
 # Roadmap
 
+## Priority: Blender-style panel editing
+
+**Active plan:** [Panel editing phases P0–P5](PANEL_EDIT_ROADMAP.md) · [tracking Issue #5](https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/5)
+
+The new editing design covers G-based panel/vertex/edge movement, axis and signed numeric entry, X deletion with modal conflict protection, Shift+A empty panel creation, duplication, preview-based Ctrl+R quad splitting, and general polygon E-midpoint/two-vertex cutting.
+
+**Status:** roadmap registered; phase implementation/acceptance must be tracked in Issue #5 and tested PRs. Current release remains v1.8.4-debug until verified.
+
 ## Current baseline: v1.8.4-debug
 
 ### Stabilization

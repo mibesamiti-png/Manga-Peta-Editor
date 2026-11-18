@@ -24,3 +24,7 @@ jobs:
 
       - name: Project checks
         run: python scripts/check_project.py
+      - name: Canvas shortcut smoke tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: python -m unittest discover -s tests -p "test_*.py"
