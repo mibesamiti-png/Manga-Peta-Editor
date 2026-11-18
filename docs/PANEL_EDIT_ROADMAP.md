@@ -129,7 +129,7 @@ Release after each verified batch if useful; never mark a batch complete based s
 
 ## P3 — N-gon panel data + selected-edge E midpoint (CI / Windows QA pending)
 
-- New Qt-free `panel_polygon.py`: validates simple polygons with >=3 vertices, non-zero area, minimum edge lengths, and no edge crossings/touches/backtracking. Concave shapes and collinear forward points from midpoint insertion are valid.
+- New standalone `app.py` geometry helpers (no extra module needed by drag/drop updater): validate simple polygons with >=3 vertices, non-zero area, minimum edge lengths, and no edge crossings/touches/backtracking. Concave shapes and collinear forward points from midpoint insertion are valid.
 - `PanelItem.custom_points` now accepts serialized polygons with 3+ finite vertices, while old four-corner projects continue to load unchanged. Existing `panel_path()` already uses `QPolygonF` for image/effect clipping and supports concavity.
 - Paint/foreground selected edges, edge hit tests, edge selection, snapping to other panels' edges, selected-handle movement and save/deserialize handle arbitrary polygon lengths.
 - In `Tab` corner mode: `Shift+edge click` selects adjacent endpoints; `E` inserts a vertex at their midpoint without moving the outline, selects the new vertex, and records one Undo entry. Repeating produces 5, 6, 7... vertices. `G` edits the new vertex, using full-polygon validity limiting to reject self-crossings.
