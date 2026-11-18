@@ -7103,6 +7103,8 @@ class MangaEditor(QMainWindow):
 
     def insert_selected_panel_edge_vertex(self):
         """E: split one selected polygon edge at its midpoint, preserving outline."""
+        if hasattr(self, "mode_combo") and self.mode_combo.currentData() not in {"select", "panel"}:
+            return False
         scene = self.current_scene()
         if scene is None:
             return False
