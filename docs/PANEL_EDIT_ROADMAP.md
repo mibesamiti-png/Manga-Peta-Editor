@@ -126,3 +126,13 @@ Release after each verified batch if useful; never mark a batch complete based s
 5. Attempt an impossible split (too many panels with large gutter); verify red preview and no deletion.
 6. Press Esc and right-click on separate attempts; verify exact restoration, no history entry; test Ctrl+R during text edit.
 7. Switch page/mode or remove selected panel during preview; ensure preview safely disappears.
+
+## P3 — N-gon panel data + selected-edge E midpoint (CI / Windows QA pending)
+
+- New Qt-free `panel_polygon.py`: validates simple polygons with >=3 vertices, non-zero area, minimum edge lengths, and no edge crossings/touches/backtracking. Concave shapes and collinear forward points from midpoint insertion are valid.
+- `PanelItem.custom_points` now accepts serialized polygons with 3+ finite vertices, while old four-corner projects continue to load unchanged. Existing `panel_path()` already uses `QPolygonF` for image/effect clipping and supports concavity.
+- Paint/foreground selected edges, edge hit tests, edge selection, snapping to other panels' edges, selected-handle movement and save/deserialize handle arbitrary polygon lengths.
+- In `Tab` corner mode: `Shift+edge click` selects adjacent endpoints; `E` inserts a vertex at their midpoint without moving the outline, selects the new vertex, and records one Undo entry. Repeating produces 5, 6, 7... vertices. `G` edits the new vertex, using full-polygon validity limiting to reject self-crossings.
+- Quad-specific parallel snap and old quad N-split/grid/advanced split remain unchanged and are **guarded for N-gons**, not silently extrapolated; polygon chord splitting is P4.
+- Synthetic regression: `tests/test_panel_polygon.py`, including concave clipping, save/load, copy independence, invalid geometry, E insertion and G editing.
+- Manual Windows acceptance still needed: add 5/6+ vertices to an image panel; move into a concave polygon; save/reopen and Undo/Redo; verify effect overlays and PNG/ZIP clipping; ensure old quad N-split works. Do not mark P3 fully accepted without evidence.
