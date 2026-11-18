@@ -5,26 +5,26 @@
 
 ## 判定規則
 
-- **A 自動ゲート**: 最新developとPR両方のWindows CIが成功。全pytest/unittestではなく、CI定義の \`unittest discover\`、構文検査、プロジェクト検査を通す。
+- **A 自動ゲート**: 最新developとPR両方のWindows CIが成功。開発用のすべてのテスト方式ではなく、CI定義の `unittest discover`、構文検査、プロジェクト検査を通す。
 - **B Windows実機ゲート**: 操作担当者が下表を実際に操作し、結果・OS・Python版・画面解像度をIssue #5に残す。
 - **C 公開/安定版ゲート**: A/B合格後、既存の動作を後退させないことを確認し develop→main。GUI未確認の間はmainを変更しない。
 - 判定: Aのみなら「実装・CI合格／実機未受入」。A+B+Cを満たせば「Blender風コマ編集 P5受入完了」。GIF等の将来候補はP5範囲外。
 
 ## A — 自動テスト（人工素材のみ）
 
-CI: \`python -m py_compile app.py\`、\`python scripts/check_project.py\`、\`QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -p "test_*.py"\`
+CI: `python -m py_compile app.py`、`python scripts/check_project.py`、`QT_QPA_PLATFORM=offscreen python -m unittest discover -s tests -p "test_*.py"`
 
 | 検証軸 | 根拠 | 結果 |
 |---|---|---|
-| Shift+A/Shift+D/G/X、数値/軸入力、誤入力防止 | test_panel_shortcuts / test_panel_grab | CI結果待ち |
-| G吸着、キャンセル、数値は正確、複数コマ | test_panel_grab_snapping | CI結果待ち |
-| 四角Ctrl+R分割、プレビューとキャンセル | test_panel_split_preview | CI結果待ち |
-| N角形の頂点追加・変形・保存 | test_panel_polygon | CI結果待ち |
-| 2頂点分割、凹多角形、ギャップ、履歴 | test_panel_chord_split | CI結果待ち |
-| 実MangaEditorのページ切替・Undo/Redo、画像とEffect継承、保存/旧形式 | test_p5_integrated_qa | CI結果待ち |
-| Effect Undo/Redo、ページ分離、復旧チェックポイント | test_p5_integrated_qa | CI結果待ち |
-| PNG/縦長PNG/ZIP書き出しと画像のデコード | test_p5_integrated_qa | CI結果待ち |
-| .py更新ファイルの静的検査、最小画面での描画 | test_p5_integrated_qa | CI結果待ち |
+| Shift+A/Shift+D/G/X、数値/軸入力、誤入力防止 | test_panel_shortcuts / test_panel_grab | PR #13 CI成功（develop統合後の再確認は別途） |
+| G吸着、キャンセル、数値は正確、複数コマ | test_panel_grab_snapping | PR #13 CI成功（develop統合後の再確認は別途） |
+| 四角Ctrl+R分割、プレビューとキャンセル | test_panel_split_preview | PR #13 CI成功（develop統合後の再確認は別途） |
+| N角形の頂点追加・変形・保存 | test_panel_polygon | PR #13 CI成功（develop統合後の再確認は別途） |
+| 2頂点分割、凹多角形、ギャップ、履歴 | test_panel_chord_split | PR #13 CI成功（develop統合後の再確認は別途） |
+| 実MangaEditorのページ切替・Undo/Redo、画像とEffect継承、保存/旧形式 | test_p5_integrated_qa | PR #13 CI成功（develop統合後の再確認は別途） |
+| Effect Undo/Redo、ページ分離、復旧チェックポイント | test_p5_integrated_qa | PR #13 CI成功（develop統合後の再確認は別途） |
+| PNG/縦長PNG/ZIP書き出しと画像のデコード | test_p5_integrated_qa | PR #13 CI成功（develop統合後の再確認は別途） |
+| .py更新ファイルの静的検査、最小画面での描画 | test_p5_integrated_qa | PR #13 CI成功（develop統合後の再確認は別途） |
 
 **注意**: オフスクリーン出力のデコード成功は、画像と重ね合わせの外観が期待どおりである保証ではない。
 
