@@ -125,6 +125,129 @@ def valid_polygon(points, min_edge_length=12.0, min_area_twice=576.0):
     return True
 
 
+def _strictly_inside_polygon(point, points):
+    """Ray-cast strict interior: boundary contact is never a valid chord."""
+    px, py = xy(point)
+    polygon = [xy(p) for p in points]
+    inside = False
+    for i in range(len(polygon)):
+        a, b = polygon[i], polygon[(i+1) % len(polygon)]
+        if abs(_cross(a, b, (px, py))) <= 1e-7 and _on_segment(a, b, (px, py), 1e-7):
+            return False
+        if (a[1] > py) != (b[1] > py):
+            ix = a[0] + (py-a[1]) * (b[0]-a[0]) / (b[1]-a[1])
+            if ix > px:
+                inside = not inside
+    return inside
+
+
+def _chord_inset_chain(chain, a, b, half_gap):
+    """Trim only the two boundary approaches to a chord, leaving rest intact.
+
+    The safe subset here is a line-separable child. Concave cases that cross
+    the infinite chord-offset line more than once are deliberately rejected
+    for positive gutters instead of silently discarding disconnected areas.
+    A zero gap supports such chords without an offset.
+    """
+    if half_gap <= 1e-9:
+        return list(chain)
+    length = math.hypot(b[0]-a[0], b[1]-a[1])
+    signed = [_cross(a, b, p) / length for p in chain]
+    inner = [d for d in signed[1:-1] if abs(d) > 1e-7]
+    if not inner:
+        return None
+    sign = 1.0 if inner[0] > 0 else -1.0
+    distances = [d*sign for d in signed]
+    if any(d < -1e-7 for d in distances[1:-1]):
+        return None
+    keep = [i for i in range(1, len(chain)-1) if distances[i] >= half_gap-1e-7]
+    if not keep or keep != list(range(keep[0], keep[-1]+1)):
+        return None
+    first, last = keep[0], keep[-1]
+    def at_offset(p, q, dp, dq):
+        if abs(dq-dp) <= 1e-9:
+            return q
+        ratio = max(0.0, min(1.0, (half_gap-dp)/(dq-dp)))
+        return (p[0]+(q[0]-p[0])*ratio, p[1]+(q[1]-p[1])*ratio)
+
+    left = at_offset(chain[first-1], chain[first], distances[first-1], distances[first])
+    right = at_offset(chain[last], chain[last+1], distances[last], distances[last+1])
+    middle = list(chain[first:last+1])
+    # Intersections that coincide with existing vertices must not introduce
+    # duplicate/zero-length edges.
+    if math.hypot(left[0]-middle[0][0], left[1]-middle[0][1]) < 1e-6:
+        middle.pop(0)
+    if middle and math.hypot(right[0]-middle[-1][0], right[1]-middle[-1][1]) < 1e-6:
+        middle.pop()
+    result = [left, *middle, right]
+    if len(result) < 3 or not _strictly_inside_polygon(
+        ((left[0]+right[0])/2, (left[1]+right[1])/2), chain
+    ):
+        return None
+    return result
+
+
+def split_polygon_chord(points, index_a, index_b, gap=0.0,
+                        min_edge_length=12.0, min_area_twice=576.0):
+    """Return exactly two child outlines for a valid interior vertex chord.
+
+    Returns [] for adjacent vertices, boundary crossings, degenerate pieces,
+    too-large gutters, or unrepresentable concave inset topology. For gap>0,
+    both cut edges are shifted by gap/2 into their own region, giving the
+    existing gutter distance with no child overlap. No source points change.
+    """
+    if not isinstance(points, (list, tuple)) or len(points) < 4:
+        return []
+    try:
+        vertices = [xy(p) for p in points]
+        n = len(vertices)
+        ia, ib = int(index_a), int(index_b)
+        gutter = float(gap)
+    except (ValueError, TypeError, IndexError, OverflowError):
+        return []
+    if (not math.isfinite(gutter) or gutter < 0
+            or ia == ib or not (0 <= ia < n and 0 <= ib < n)
+            or (ia-ib) % n in (1, n-1)
+            or not valid_polygon(vertices, min_edge_length, min_area_twice)):
+        return []
+    a, b = vertices[ia], vertices[ib]
+
+    # Every intersection with a nonincident polygon edge invalidates a cut,
+    # including a tangency or a pass through another vertex.
+    incident = {(ia-1) % n, ia, (ib-1) % n, ib}
+    for edge in range(n):
+        c, d = vertices[edge], vertices[(edge+1) % n]
+        if edge in incident:
+            continue
+        if _segments_touch_or_cross(a, b, c, d, 1e-7):
+            return []
+    for t in (0.001, 0.05, 0.25, 0.5, 0.75, 0.95, 0.999):
+        sample = (a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t)
+        if not _strictly_inside_polygon(sample, vertices):
+            return []
+
+    def boundary_chain(start, end):
+        result = [vertices[start]]
+        idx = start
+        while idx != end:
+            idx = (idx+1) % n
+            result.append(vertices[idx])
+        return result
+
+    chains = [boundary_chain(ia, ib), boundary_chain(ib, ia)]
+    if not all(valid_polygon(chain, min_edge_length, min_area_twice)
+               for chain in chains):
+        return []
+    if gutter <= 1e-9:
+        return chains
+
+    inset = [_chord_inset_chain(chain, a, b, gutter/2) for chain in chains]
+    if any(child is None or not valid_polygon(child, min_edge_length, min_area_twice)
+           for child in inset):
+        return []
+    return inset
+
+
 APP_VERSION = "1.8.4-debug"
 DEFAULT_CANVAS_W = 1200
 DEFAULT_CANVAS_H = 1697
