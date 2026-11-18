@@ -4350,7 +4350,7 @@ class MangaEditor(QMainWindow):
         corner_lay.addWidget(QLabel(
             "コマを選択 → Tabで四隅編集ON/OFF → ○をドラッグ。\n"
             "Ctrl+○クリック=複数頂点 / Shift+辺クリック=辺の2頂点を選択。\n"
-            "選択中の頂点・辺はオレンジ。\\n"
+            "選択中の頂点・辺はオレンジ。\n"
             "キャンバス上でShift+A=空コマ追加 / Shift+D=選択コマ複製。"
         ))
         panel_lay.addWidget(corner_box)
