@@ -87,9 +87,10 @@ class ChordGeometryTests(unittest.TestCase):
         self.assertEqual(split_polygon_chord(pts,0,2,-1),[])
 
     def test_chord_touching_nonadjacent_boundary_is_rejected(self):
-        # Chord 0->3 of this outline goes through vertex 2.
-        pts = [(0,0),(240,0),(240,120),(240,240),(0,240)]
-        self.assertEqual(split_polygon_chord(pts,0,3,0),[])
+        # Chord 0->2 passes exactly through the notch vertex 3.
+        pts = [(0,0),(320,0),(320,240),(160,120),(0,240)]
+        self.assertTrue(valid_polygon(pts))
+        self.assertEqual(split_polygon_chord(pts,0,2,0),[])
 
     def test_geometry_input_is_not_mutated(self):
         pts = [(0,0),(320,0),(320,240),(0,240)]
