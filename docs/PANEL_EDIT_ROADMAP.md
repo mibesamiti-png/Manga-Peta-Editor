@@ -96,3 +96,12 @@ Release after each verified batch if useful; never mark a batch complete based s
 - Modal previews are cancelled when scene/page changes, focus leaves canvas, or editor mode changes.
 - `G` on enabled corner-edit handles deliberately displays a not-yet-supported notice; vertex/edge movement is B2, and **is not claimed in B1**.
 - Synthetic offscreen regressions are in `tests/test_panel_grab.py`. Windows interactive GUI validation remains required.
+
+## B2 selected corner/edge G (verification pending)
+
+- Extends the B1 modal lifecycle to selected corner handles (`Tab` ON); Shift+edge selection is the existing two-handle representation of a selected edge.
+- Multiple selected handles, including across selected panels, move using one scene delta. Constrained and numeric moves are in scene/page axes, then converted to each panel's local axes.
+- The current quadrilateral geometry is validated during preview; excessive movement is limited to preserve minimum edge length, non-crossing and convexity. All selected handles in one panel use the same scale factor to avoid shearing.
+- Esc/right click restores original vertex positions without history; Enter/left click commits exactly one snapshot and recalculates transform origin.
+- Note: this B2 patch uses **validity limiting but not snap-to-other-panel** during G. Existing pointer-drag snap behavior is unchanged. Dedicated G snapping parity remains a follow-up acceptance condition before P1 is fully complete.
+- Windows GUI validation remains outstanding; do not mark B2 fully accepted based on code alone.

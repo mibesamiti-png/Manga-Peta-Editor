@@ -2296,12 +2296,7 @@ class CanvasView(QGraphicsView):
         )
 
     def begin_panel_grab(self):
-        """Start non-destructive G preview for selected whole panels.
-
-        Corner/edge G will use the same modal lifecycle in the next batch;
-        this batch deliberately refuses that mode rather than moving the
-        whole panel unexpectedly.
-        """
+        """Start non-destructive G preview for selected panels or edit handles."""
         if self._panel_grab is not None or self.region_mosaic_mode:
             return False
         editor = self.window()
@@ -2318,17 +2313,34 @@ class CanvasView(QGraphicsView):
         if not panels:
             editor.statusBar().showMessage("G: 先に移動するコマを選択してください", 2200)
             return False
-        if any(panel.corner_edit_enabled for panel in panels):
-            editor.statusBar().showMessage(
-                "G: 四隅編集中の頂点・辺移動は次の実装段階で対応します", 3500
-            )
-            return False
+        editing = [p for p in panels if p.corner_edit_enabled]
+        groups = []
+        if editing:
+            for panel in editing:
+                indices = set(panel._selected_corner_indices)
+                if not indices:
+                    continue
+                groups.append({
+                    "panel": panel,
+                    "indices": indices,
+                    "points": [QPointF(p) for p in panel.corner_points()],
+                })
+            if not groups:
+                editor.statusBar().showMessage(
+                    "G: 四隅編集中は頂点または辺を選択してください", 2500
+                )
+                return False
+            # In mixed selection move only the explicit edit handles, never
+            # unsuspecting whole panels at the same time.
+            panels = [group["panel"] for group in groups]
 
         # QCursor is in global pixels; map through viewport into scene
         # coordinates so canvas zoom has no effect on numeric movement.
         local_cursor = self.viewport().mapFromGlobal(QCursor.pos())
         self._panel_grab = {
             "scene": scene,
+            "kind": "handles" if groups else "panels",
+            "groups": groups,
             "initial": {panel: QPointF(panel.pos()) for panel in panels},
             "anchor": self.mapToScene(local_cursor),
             "mouse_delta": QPointF(0, 0),
@@ -2338,8 +2350,10 @@ class CanvasView(QGraphicsView):
             "delta": QPointF(0, 0),
         }
         self.setCursor(Qt.SizeAllCursor)
+        target_name = "選択頂点・辺" if groups else "コマ全体"
         editor.statusBar().showMessage(
-            "G移動: マウス移動 / X・Y軸固定 / 数値px / 左クリック・Enter確定 / Esc・右クリック取消"
+            f"G移動 ({target_name}): マウス / X・Y軸固定 / 数値px / "
+            "左クリック・Enter確定 / Esc・右クリック取消"
         )
         return True
 
@@ -2363,6 +2377,36 @@ class CanvasView(QGraphicsView):
             return QPointF(0, raw.y())
         return QPointF(raw)
 
+    def _bounded_handle_delta(self, panel, group, scene_delta):
+        """Keep selected vertices rigid while preserving a valid quadrilateral.
+
+        Unlike sequential per-vertex clamping, applying the same fraction to
+        all selected vertices prevents an edge from unexpectedly shearing.
+        """
+        editor = self.window()
+        start = group["points"]
+        indices = group["indices"]
+        local = editor._scene_delta_to_local(panel, scene_delta)
+
+        def candidate(factor):
+            points = [QPointF(p) for p in start]
+            step = QPointF(local.x()*factor, local.y()*factor)
+            for idx in indices:
+                points[idx] += step
+            return points
+
+        proposed = candidate(1.0)
+        if editor._valid_panel_quad(proposed):
+            return proposed
+        lo, hi = 0.0, 1.0
+        for _ in range(24):
+            mid = (lo + hi) / 2.0
+            if editor._valid_panel_quad(candidate(mid)):
+                lo = mid
+            else:
+                hi = mid
+        return candidate(lo)
+
     def _apply_panel_grab(self):
         state = self._panel_grab
         if state is None:
@@ -2375,12 +2419,21 @@ class CanvasView(QGraphicsView):
             return
         delta = self._panel_grab_delta()
         state["delta"] = delta
-        for panel, original in state["initial"].items():
-            panel.setPos(original + delta)
+        if state["kind"] == "handles":
+            for group in state["groups"]:
+                panel = group["panel"]
+                new_points = self._bounded_handle_delta(panel, group, delta)
+                panel.prepareGeometryChange()
+                panel.custom_points = new_points
+                panel.update()
+        else:
+            for panel, original in state["initial"].items():
+                panel.setPos(original + delta)
         self.viewport().update()
         axis = state["axis"] or "XY"
+        target_name = "頂点・辺" if state["kind"] == "handles" else "コマ"
         self.window().statusBar().showMessage(
-            f"G移動 [{axis.upper()}]  X={delta.x():+.2f}px Y={delta.y():+.2f}px  "
+            f"G {target_name} [{axis.upper()}]  X={delta.x():+.2f}px Y={delta.y():+.2f}px  "
             "左クリック/Enter=確定  Esc/右クリック=取消"
         )
 
@@ -2390,9 +2443,27 @@ class CanvasView(QGraphicsView):
             return False
         self._panel_grab = None
         self.unsetCursor()
-        delta = state["delta"]
-        changed = abs(delta.x()) > 1e-6 or abs(delta.y()) > 1e-6
+        if state["kind"] == "handles":
+            changed = any(
+                any(
+                    abs(current.x()-original.x()) > 1e-6
+                    or abs(current.y()-original.y()) > 1e-6
+                    for current, original in zip(group["panel"].corner_points(), group["points"])
+                )
+                for group in state["groups"]
+                if group["panel"].scene() is state["scene"]
+            )
+        else:
+            delta = state["delta"]
+            changed = abs(delta.x()) > 1e-6 or abs(delta.y()) > 1e-6
         if not commit or not changed:
+            if state["kind"] == "handles":
+                for group in state["groups"]:
+                    panel = group["panel"]
+                    if panel.scene() is state["scene"]:
+                        panel.prepareGeometryChange()
+                        panel.custom_points = [QPointF(p) for p in group["points"]]
+                        panel.update()
             for panel, original in state["initial"].items():
                 if panel.scene() is state["scene"]:
                     panel.setPos(original)
@@ -2400,6 +2471,11 @@ class CanvasView(QGraphicsView):
             if not commit:
                 self.window().statusBar().showMessage("G移動をキャンセルしました", 1600)
             return False
+        if state["kind"] == "handles":
+            for group in state["groups"]:
+                panel = group["panel"]
+                if panel.scene() is state["scene"]:
+                    panel.sync_transform_origin_to_visual_center()
         editor = self.window()
         if hasattr(editor, "record_history"):
             editor.record_history()
@@ -4554,7 +4630,8 @@ class MangaEditor(QMainWindow):
             "コマを選択 → Tabで四隅編集ON/OFF → ○をドラッグ。\n"
             "Ctrl+○クリック=複数頂点 / Shift+辺クリック=辺の2頂点を選択。\n"
             "選択中の頂点・辺はオレンジ。\n"
-            "キャンバス上でShift+A=空コマ追加 / Shift+D=選択コマ複製。"
+            "G=選択頂点/辺を移動（X/Yで軸指定・数値px） / "
+            "Shift+A=空コマ追加 / Shift+D=複製。"
         ))
         panel_lay.addWidget(corner_box)
 
