@@ -9,7 +9,7 @@ import unittest
 
 from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QKeyEvent
-from PySide6.QtWidgets import QApplication, QGraphicsScene, QGraphicsTextItem, QMainWindow
+from PySide6.QtWidgets import QApplication, QGraphicsItem, QGraphicsScene, QGraphicsTextItem, QMainWindow
 
 from app import CanvasView
 
@@ -64,7 +64,7 @@ class CanvasPanelShortcutTests(unittest.TestCase):
         scene = self.editor.view.scene()
         text = QGraphicsTextItem("test")
         text.setTextInteractionFlags(Qt.TextEditorInteraction)
-        text.setFlag(text.GraphicsItemFlag.ItemIsFocusable, True)
+        text.setFlag(QGraphicsItem.ItemIsFocusable, True)
         scene.addItem(text)
         scene.setFocusItem(text)
         self.assertIs(scene.focusItem(), text)
