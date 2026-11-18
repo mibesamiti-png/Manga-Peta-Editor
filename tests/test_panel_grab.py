@@ -22,6 +22,8 @@ class EditorHarness(QMainWindow):
     delete_selected_panels = MangaEditor.delete_selected_panels
     _scene_delta_to_local = MangaEditor._scene_delta_to_local
     _valid_panel_quad = MangaEditor._valid_panel_quad
+    _valid_panel_polygon = staticmethod(MangaEditor._valid_panel_polygon)
+    _panel_shape_valid = MangaEditor._panel_shape_valid
     _segments_intersect = staticmethod(MangaEditor._segments_intersect)
 
     def __init__(self):
