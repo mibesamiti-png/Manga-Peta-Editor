@@ -105,3 +105,24 @@ Release after each verified batch if useful; never mark a batch complete based s
 - Esc/right click restores original vertex positions without history; Enter/left click commits exactly one snapshot and recalculates transform origin.
 - Note: this B2 patch uses **validity limiting but not snap-to-other-panel** during G. Existing pointer-drag snap behavior is unchanged. Dedicated G snapping parity remains a follow-up acceptance condition before P1 is fully complete.
 - Windows GUI validation remains outstanding; do not mark B2 fully accepted based on code alone.
+
+## P2 interactive Ctrl+R quad split — implementation record
+
+- Source: `CanvasView` enters a non-mutating `_panel_split_preview` state after `Ctrl+R` for exactly one selected valid four-corner panel.
+- Mouse horizontal movement selects `vertical` (left/right pieces); vertical movement selects `horizontal` (upper/lower pieces), in panel-local coordinates (rotated panels behave consistently). Current N-split UI orientation is the initial default.
+- View foreground draws dashed orange centerlines in scene coordinates; red marks a split that is too narrow/invalid.
+- Mouse wheel changes count in range **2–12**. The preview never adds or removes scene items, and adds no Undo entry.
+- Left click commits via existing `MangaEditor.split_selected_panel_n()`, preserving established gap setting, image-inheritance mode, rotation/scale path and single Undo transaction. Invalid split stays in preview. Esc/right-click cancels with no scene/history changes.
+- Existing N-split and advanced split buttons are preserved.
+- For diagonally selected vertex pairs, `Ctrl+R` deliberately declines automatic splitting until P4 two-vertex chord mode exists. N-gons similarly wait until P3/P4.
+- New synthetic offscreen tests: `tests/test_panel_split_preview.py` covering orientation, wheel limits, rect gutter, freeform quad splitting, invalid geometry, cancel, text-focus precedence, modal G/X suppression, and scene changes.
+
+### P2 manual Windows acceptance checklist (still pending)
+
+1. Focus canvas; select one ordinary rectangular panel and press Ctrl+R; confirm dashed line appears, no scene change.
+2. Move mouse horizontally/vertically; verify orientation switches; use wheel to adjust 2..12.
+3. Left-click; verify count and gap, then Ctrl+Z and Ctrl+Y restore the split as one action.
+4. Repeat on a skewed/freeform quad containing an image and effects; verify clipping/content/transform and chosen image inheritance setting.
+5. Attempt an impossible split (too many panels with large gutter); verify red preview and no deletion.
+6. Press Esc and right-click on separate attempts; verify exact restoration, no history entry; test Ctrl+R during text edit.
+7. Switch page/mode or remove selected panel during preview; ensure preview safely disappears.
