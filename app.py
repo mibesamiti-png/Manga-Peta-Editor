@@ -2892,8 +2892,26 @@ class CanvasView(QGraphicsView):
             self.finish_panel_grab(commit=False)
             return
         delta = self._panel_grab_delta()
-        state["delta"] = delta
+        editor = self.window()
+        # Mouse movement follows the same snapping policy as pointer dragging.
+        # Explicit numeric entry is exact, and an idle G preview must not drift.
+        numeric = bool(state["digits"] and state["digits"] != ".")
+        moving = not numeric and (abs(delta.x()) > 0.05 or abs(delta.y()) > 0.05)
         if state["kind"] == "handles":
+            if moving and hasattr(editor, "_best_group_corner_delta"):
+                proposed = editor._best_group_corner_delta(
+                    {
+                        "groups": state["groups"],
+                        "moving_panels": tuple(state["initial"]),
+                    },
+                    delta,
+                )
+                if state["axis"] == "x":
+                    delta = QPointF(proposed.x(), 0)
+                elif state["axis"] == "y":
+                    delta = QPointF(0, proposed.y())
+                else:
+                    delta = proposed
             for group in state["groups"]:
                 panel = group["panel"]
                 new_points = self._bounded_handle_delta(panel, group, delta)
@@ -2901,8 +2919,20 @@ class CanvasView(QGraphicsView):
                 panel.custom_points = new_points
                 panel.update()
         else:
+            # The object snap helper reads the proposed scene positions; reset
+            # each panel from its immutable G anchor after the correction.
             for panel, original in state["initial"].items():
                 panel.setPos(original + delta)
+            if moving and hasattr(editor, "_group_snap_correction"):
+                correction = editor._group_snap_correction(list(state["initial"]))
+                if state["axis"] == "x":
+                    correction.setY(0)
+                elif state["axis"] == "y":
+                    correction.setX(0)
+                delta += correction
+                for panel, original in state["initial"].items():
+                    panel.setPos(original + delta)
+        state["delta"] = delta
         self.viewport().update()
         axis = state["axis"] or "XY"
         target_name = "頂点・辺" if state["kind"] == "handles" else "コマ"
@@ -5654,19 +5684,24 @@ class MangaEditor(QMainWindow):
         root.addWidget(close)
         dlg.exec()
 
-    def snap_selected_items(self):
-        """Snap a single item or a multi-selection as one rigid group."""
+    def _group_snap_correction(self, selected):
+        """Compute a rigid snap offset without mutating item positions or history.
+
+        Used both by pointer-drag release and the G preview so they share
+        thresholds, page targets, and other-item alignment. All selected
+        items are excluded from snap targets.
+        """
         if not hasattr(self, "snap_check") or not self.snap_check.isChecked():
-            return
+            return QPointF(0, 0)
         scene = self.current_scene()
         if not scene:
-            return
+            return QPointF(0, 0)
         selected = [
-            i for i in scene.selectedItems()
-            if i.parentItem() is None and i.isVisible()
+            i for i in selected
+            if i.scene() is scene and i.parentItem() is None and i.isVisible()
         ]
         if not selected:
-            return
+            return QPointF(0, 0)
 
         threshold = (
             float(self.snap_threshold_spin.value())
@@ -5677,14 +5712,10 @@ class MangaEditor(QMainWindow):
 
         selected_set = set(selected)
         selected_rects = [self._snap_scene_rect(i) for i in selected]
-
         group_rect = QRectF(selected_rects[0])
         for br in selected_rects[1:]:
             group_rect = group_rect.united(br)
 
-        # Every item edge/centre can act as a sensor while the whole selection
-        # receives the same dx/dy. This restores the "easy to catch" feeling
-        # for single and multi-object placement.
         anchors_x = []
         anchors_y = []
         for br in selected_rects + [group_rect]:
@@ -5723,21 +5754,32 @@ class MangaEditor(QMainWindow):
             for ay in anchors_y
             if abs(ty-ay) <= threshold
         ]
-
         dx = min(dx_candidates, key=abs) if dx_candidates else 0.0
         dy = min(dy_candidates, key=abs) if dy_candidates else 0.0
-
         if abs(dx) < 0.05:
             dx = 0.0
         if abs(dy) < 0.05:
             dy = 0.0
+        return QPointF(dx, dy)
 
+    def snap_selected_items(self):
+        """Snap a single item or a multi-selection as one rigid group."""
+        scene = self.current_scene()
+        if not scene:
+            return
+        selected = [
+            i for i in scene.selectedItems()
+            if i.parentItem() is None and i.isVisible()
+        ]
+        if not selected:
+            return
+        correction = self._group_snap_correction(selected)
+        dx, dy = correction.x(), correction.y()
         if dx or dy:
             for item in selected:
                 item.moveBy(dx, dy)
             self.statusBar().showMessage(
-                f"吸着: X {dx:+.1f}px / Y {dy:+.1f}px",
-                1400
+                f"吸着: X {dx:+.1f}px / Y {dy:+.1f}px", 1400
             )
 
     def project_image_sources(self):
