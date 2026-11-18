@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+from panel_polygon import valid_polygon, edge_midpoint
 
 from PySide6.QtCore import Qt, QRectF, QPointF, QBuffer, QByteArray, QIODevice, QSize, QTimer
 from PySide6.QtGui import (
@@ -1115,7 +1116,7 @@ class BubbleItem(QGraphicsPathItem):
 
 
 class PanelItem(QGraphicsRectItem):
-    """Comic panel with clipped image, normal resize and four-corner freeform editing."""
+    """Comic panel with clipped image, resizing and editable polygon vertices."""
     HANDLE = 20
     CORNER_HANDLE = 17
     MIN_PANEL_SIZE = 24.0
@@ -1135,10 +1136,14 @@ class PanelItem(QGraphicsRectItem):
         self.image_offset = QPointF(float(off[0]), float(off[1]))
         self.skew = max(-0.35, min(0.35, float(skew or 0.0)))
         self.custom_points = None
-        if custom_points and len(custom_points) == 4:
+        if isinstance(custom_points, (list, tuple)) and len(custom_points) >= 3:
             try:
-                self.custom_points = [QPointF(float(p[0]), float(p[1])) for p in custom_points]
-            except Exception:
+                loaded = [QPointF(float(p[0]), float(p[1])) for p in custom_points]
+                if all(math.isfinite(p.x()) and math.isfinite(p.y()) for p in loaded):
+                    # Retain stored geometry rather than silently substituting
+                    # a rectangle when loading a legacy/unusual project.
+                    self.custom_points = loaded
+            except (TypeError, ValueError, IndexError, OverflowError):
                 self.custom_points = None
         self._panning_image = False
         self._pan_last = QPointF()
@@ -1467,9 +1472,9 @@ class PanelItem(QGraphicsRectItem):
                 edge_pen = QPen(QColor("#ff9f1a"), 6)
                 edge_pen.setCosmetic(True)
                 painter.setPen(edge_pen)
-                for edge_idx in range(4):
+                for edge_idx in range(len(pts)):
                     a_idx = edge_idx
-                    b_idx = (edge_idx + 1) % 4
+                    b_idx = (edge_idx + 1) % len(pts)
                     if (
                         a_idx in self._selected_corner_indices
                         and b_idx in self._selected_corner_indices
@@ -1517,9 +1522,9 @@ class PanelItem(QGraphicsRectItem):
         threshold = self.CORNER_HANDLE * 1.15
         best = None
         best_dist = threshold + 1.0
-        for idx in range(4):
+        for idx in range(len(pts)):
             a = pts[idx]
-            b = pts[(idx+1) % 4]
+            b = pts[(idx+1) % len(pts)]
             vx = b.x() - a.x()
             vy = b.y() - a.y()
             denom = vx*vx + vy*vy
@@ -1540,6 +1545,8 @@ class PanelItem(QGraphicsRectItem):
     def _clamp_corner(self, idx, p):
         """Prevent inversion without anchoring corners to the old rect centre."""
         pts = self.corner_points()
+        if len(pts) != 4:
+            return QPointF(p)  # N-gons use whole-shape validation instead.
         opposite = pts[(int(idx) + 2) % 4]
         minimum = self.MIN_PANEL_SIZE
         x, y = float(p.x()), float(p.y())
@@ -1856,9 +1863,9 @@ class CanvasView(QGraphicsView):
                         edge_pen = QPen(QColor("#ff9f1a"), 6)
                         edge_pen.setCosmetic(True)
                         painter.setPen(edge_pen)
-                        for edge_idx in range(4):
+                        for edge_idx in range(len(scene_points)):
                             a_idx = edge_idx
-                            b_idx = (edge_idx + 1) % 4
+                            b_idx = (edge_idx + 1) % len(scene_points)
                             if (
                                 a_idx in item._selected_corner_indices
                                 and b_idx in item._selected_corner_indices
@@ -5743,8 +5750,9 @@ class MangaEditor(QMainWindow):
             or not panel.corner_edit_enabled
         ):
             return
-        a = int(edge_index) % 4
-        b = (a + 1) % 4
+        n = len(panel.corner_points())
+        a = int(edge_index) % n
+        b = (a + 1) % n
         both_selected = (
             a in panel._selected_corner_indices
             and b in panel._selected_corner_indices
@@ -5832,6 +5840,8 @@ class MangaEditor(QMainWindow):
             return QPointF(proposed)
 
         pts = [QPointF(p) for p in start_points]
+        if len(pts) != 4:
+            return QPointF(proposed)  # Opposite-edge parallel snap is quad-only.
         i = int(idx) % 4
         prev_i = (i - 1) % 4
         next_i = (i + 1) % 4
@@ -5897,6 +5907,18 @@ class MangaEditor(QMainWindow):
             and cd_a * cd_b < -1e-7
         )
 
+    @staticmethod
+    def _valid_panel_polygon(points):
+        return valid_polygon(
+            points,
+            min_edge_length=PanelItem.MIN_EDGE_LENGTH,
+            min_area_twice=PanelItem.MIN_PANEL_SIZE ** 2,
+        )
+
+    def _panel_shape_valid(self, points):
+        # Preserve existing convex quad constraints; N-gons may be concave.
+        return self._valid_panel_quad(points) if len(points) == 4 else self._valid_panel_polygon(points)
+
     def _valid_panel_quad(self, points):
         if len(points) != 4:
             return False
@@ -5940,10 +5962,10 @@ class MangaEditor(QMainWindow):
         return True
 
     def _rigid_clamp_local_delta(self, panel, indices, start_points, delta):
-        """Rigidly move selected vertices; only shorten motion if the quad would invert."""
+        """Bound selected-handle movement before polygon edges cross."""
         indices = set(indices)
-        if len(indices) < 2:
-            return QPointF(delta)
+        if len(indices) < 2 and len(start_points) == 4:
+            return QPointF(delta)  # Keep legacy quad single-corner behavior.
 
         def candidate(factor):
             pts = [QPointF(p) for p in start_points]
@@ -5952,13 +5974,13 @@ class MangaEditor(QMainWindow):
                 pts[idx] = pts[idx] + step
             return pts
 
-        if self._valid_panel_quad(candidate(1.0)):
+        if self._panel_shape_valid(candidate(1.0)):
             return QPointF(delta)
 
         low, high = 0.0, 1.0
         for _ in range(20):
             mid = (low + high) / 2.0
-            if self._valid_panel_quad(candidate(mid)):
+            if self._panel_shape_valid(candidate(mid)):
                 low = mid
             else:
                 high = mid
@@ -6031,7 +6053,7 @@ class MangaEditor(QMainWindow):
             panel = group["panel"]
             start_points = group["points"]
             local_delta = self._scene_delta_to_local(panel, raw_scene_delta)
-            if len(group["indices"]) >= 2:
+            if len(group["indices"]) >= 2 or len(start_points) != 4:
                 local_delta = self._rigid_clamp_local_delta(
                     panel, group["indices"], start_points, local_delta
                 )
@@ -6086,9 +6108,9 @@ class MangaEditor(QMainWindow):
             local_delta = self._scene_delta_to_local(
                 panel, snapped_scene_delta
             )
-            if len(group["indices"]) >= 2:
-                # A selected edge / arbitrary pair is a rigid translation by
-                # default: no endpoint can be clamped differently and shear it.
+            if len(group["indices"]) >= 2 or len(start_points) != 4:
+                # All selected handles translate rigidly; N-gon single handles
+                # must also stay inside the simple-polygon validity boundary.
                 local_delta = self._rigid_clamp_local_delta(
                     panel, group["indices"], start_points, local_delta
                 )
@@ -6097,7 +6119,7 @@ class MangaEditor(QMainWindow):
             new_points = [QPointF(p) for p in start_points]
             for idx in group["indices"]:
                 proposed = start_points[idx] + local_delta
-                if len(group["indices"]) == 1:
+                if len(group["indices"]) == 1 and len(start_points) == 4:
                     proposed = self._parallel_snap_corner_local(
                         panel, idx, proposed, start_points
                     )
@@ -6161,13 +6183,13 @@ class MangaEditor(QMainWindow):
                 continue
 
             pts = [other.mapToScene(p) for p in other.corner_points()]
-            if len(pts) != 4:
+            if len(pts) < 3:
                 continue
             other_center = QPolygonF(pts).boundingRect().center()
 
-            for i in range(4):
+            for i in range(len(pts)):
                 a = pts[i]
-                b = pts[(i+1) % 4]
+                b = pts[(i+1) % len(pts)]
                 projection, _t = self._closest_point_on_segment(scene_point, a, b)
 
                 ex = b.x() - a.x()
@@ -6976,8 +6998,9 @@ class MangaEditor(QMainWindow):
         indices = set(getattr(panel, "_selected_corner_indices", set()))
         if len(indices) != 2:
             return None
-        for edge_idx in range(4):
-            if indices == {edge_idx, (edge_idx + 1) % 4}:
+        n = len(panel.corner_points())
+        for edge_idx in range(n):
+            if indices == {edge_idx, (edge_idx + 1) % n}:
                 return edge_idx
         return None
 
@@ -7001,6 +7024,8 @@ class MangaEditor(QMainWindow):
     ):
         """Split a 4-point quad into strips using bilinear edge interpolation."""
         pts = [QPointF(p) for p in points]
+        if len(pts) != 4:
+            return []  # Quad-only; P4 handles polygon chord cuts.
         count = max(2, int(count))
 
         if orientation == "horizontal":
@@ -7042,6 +7067,8 @@ class MangaEditor(QMainWindow):
 
     def _freeform_grid_cells(self, points, count, gap):
         pts = [QPointF(p) for p in points]
+        if len(pts) != 4:
+            return []
         cols = max(1, min(count, math.ceil(math.sqrt(count))))
         rows = math.ceil(count / cols)
 
@@ -7155,6 +7182,9 @@ class MangaEditor(QMainWindow):
             return
 
         panel = panels[0]
+        if len(panel.corner_points()) != 4:
+            QMessageBox.information(self, "高度分割", "多角形の分割はP4の2頂点分割で対応します。")
+            return
         if panel.custom_points is None:
             panel.enable_freeform()
         edge_idx = self._selected_panel_edge_index(panel)
@@ -7217,6 +7247,9 @@ class MangaEditor(QMainWindow):
         panel = panels[0]
         scene = self.current_scene()
         if scene is None:
+            return
+        if len(panel.corner_points()) != 4:
+            QMessageBox.information(self, "コマ分割", "N角形は後続の2頂点分割で対応します。")
             return
 
         if count is None:
