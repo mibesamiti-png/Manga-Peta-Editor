@@ -4857,6 +4857,10 @@ class MangaEditor(QMainWindow):
         split_exec = QPushButton("選択コマをN分割")
         split_exec.clicked.connect(self.split_selected_panel_n_from_ui)
         nsplit_lay.addRow(split_exec)
+        nsplit_lay.addRow(QLabel(
+            "ショートカット Ctrl+R: 切断線プレビュー → マウスで左右/上下を選択 → "
+            "ホイールで2～12分割 → 左クリックで確定（Escで中止）。"
+        ))
         panel_lay.addWidget(nsplit_box)
 
         advanced_box = QGroupBox("高度分割（Shift+辺選択）")
