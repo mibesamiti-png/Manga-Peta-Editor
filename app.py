@@ -19,7 +19,7 @@ from PIL import Image, ImageFilter, ImageEnhance, ImageOps
 from PySide6.QtCore import Qt, QRectF, QPointF, QBuffer, QByteArray, QIODevice, QSize, QTimer
 from PySide6.QtGui import (
     QAction, QBrush, QColor, QFont, QImage, QPainter, QPainterPath,
-    QPen, QPixmap, QPolygonF, QTransform, QFontMetricsF, QIcon, QKeySequence
+    QPen, QPixmap, QPolygonF, QTransform, QFontMetricsF, QIcon, QKeySequence, QCursor
 )
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog,
@@ -1778,6 +1778,20 @@ class CanvasView(QGraphicsView):
         self._forced_text_drag_start_scene = QPointF()
         self._forced_text_drag_start_pos = QPointF()
         self._forced_text_drag_moved = False
+        self._panel_grab = None
+        self.setMouseTracking(True)
+        self.viewport().setMouseTracking(True)
+
+    def setScene(self, scene):
+        # Page switching must not accidentally save transient grab previews.
+        if getattr(self, "_panel_grab", None) is not None:
+            self.finish_panel_grab(commit=False)
+        super().setScene(scene)
+
+    def focusOutEvent(self, event):
+        if self._panel_grab is not None:
+            self.finish_panel_grab(commit=False)
+        super().focusOutEvent(event)
 
     def drawBackground(self, painter, rect):
         editor = self.window()
@@ -1864,6 +1878,10 @@ class CanvasView(QGraphicsView):
         painter.restore()
 
     def wheelEvent(self, event):
+        if self._panel_grab is not None:
+            # Prevent normal canvas zoom/scroll from interfering with G.
+            event.accept()
+            return
         if event.modifiers() & Qt.ControlModifier:
             factor = 1.12 if event.angleDelta().y() > 0 else 1/1.12
             self.scale(factor, factor)
@@ -2018,6 +2036,13 @@ class CanvasView(QGraphicsView):
         return None
 
     def mousePressEvent(self, event):
+        if self._panel_grab is not None:
+            if event.button() == Qt.LeftButton:
+                self.finish_panel_grab(commit=True)
+            elif event.button() == Qt.RightButton:
+                self.finish_panel_grab(commit=False)
+            event.accept()
+            return
         if not self.region_mosaic_mode and event.button() == Qt.LeftButton:
             pos = self.mapToScene(event.position().toPoint())
             editor = self.window()
@@ -2118,6 +2143,9 @@ class CanvasView(QGraphicsView):
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event):
+        if self._panel_grab is not None:
+            event.accept()
+            return
         pos = self.mapToScene(event.pos())
         text_item = self._priority_text_at(pos)
         if text_item is not None:
@@ -2133,6 +2161,13 @@ class CanvasView(QGraphicsView):
         super().contextMenuEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._panel_grab is not None:
+            grab = self._panel_grab
+            mouse = self.mapToScene(event.position().toPoint())
+            grab["mouse_delta"] = mouse - grab["anchor"]
+            self._apply_panel_grab()
+            event.accept()
+            return
         if self._forced_corner_drag:
             editor = self.window()
             if hasattr(editor, "update_corner_group_drag"):
@@ -2170,6 +2205,9 @@ class CanvasView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self._panel_grab is not None:
+            event.accept()
+            return
         if self._forced_corner_drag:
             self._forced_corner_drag = False
             editor = self.window()
@@ -2249,41 +2287,203 @@ class CanvasView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
 
+    def _is_editing_canvas_text(self):
+        scene = self.scene()
+        item = scene.focusItem() if scene is not None else None
+        return (
+            isinstance(item, QGraphicsTextItem)
+            and bool(item.textInteractionFlags() & Qt.TextEditorInteraction)
+        )
+
+    def begin_panel_grab(self):
+        """Start non-destructive G preview for selected whole panels.
+
+        Corner/edge G will use the same modal lifecycle in the next batch;
+        this batch deliberately refuses that mode rather than moving the
+        whole panel unexpectedly.
+        """
+        if self._panel_grab is not None or self.region_mosaic_mode:
+            return False
+        editor = self.window()
+        mode = editor.mode_combo.currentData() if hasattr(editor, "mode_combo") else "select"
+        if mode not in {"select", "panel"}:
+            return False
+        scene = self.scene()
+        if scene is None:
+            return False
+        panels = [
+            item for item in scene.selectedItems()
+            if isinstance(item, PanelItem) and item.parentItem() is None
+        ]
+        if not panels:
+            editor.statusBar().showMessage("G: 先に移動するコマを選択してください", 2200)
+            return False
+        if any(panel.corner_edit_enabled for panel in panels):
+            editor.statusBar().showMessage(
+                "G: 四隅編集中の頂点・辺移動は次の実装段階で対応します", 3500
+            )
+            return False
+
+        # QCursor is in global pixels; map through viewport into scene
+        # coordinates so canvas zoom has no effect on numeric movement.
+        local_cursor = self.viewport().mapFromGlobal(QCursor.pos())
+        self._panel_grab = {
+            "scene": scene,
+            "initial": {panel: QPointF(panel.pos()) for panel in panels},
+            "anchor": self.mapToScene(local_cursor),
+            "mouse_delta": QPointF(0, 0),
+            "axis": None,
+            "digits": "",
+            "negative": False,
+            "delta": QPointF(0, 0),
+        }
+        self.setCursor(Qt.SizeAllCursor)
+        editor.statusBar().showMessage(
+            "G移動: マウス移動 / X・Y軸固定 / 数値px / 左クリック・Enter確定 / Esc・右クリック取消"
+        )
+        return True
+
+    def _panel_grab_delta(self):
+        state = self._panel_grab
+        if state is None:
+            return QPointF(0, 0)
+        if state["digits"] and state["digits"] != ".":
+            value = float(state["digits"])
+            if state["negative"]:
+                value = -value
+            if state["axis"] == "x":
+                return QPointF(value, 0)
+            if state["axis"] == "y":
+                return QPointF(0, value)
+            return QPointF(value, value)
+        raw = state["mouse_delta"]
+        if state["axis"] == "x":
+            return QPointF(raw.x(), 0)
+        if state["axis"] == "y":
+            return QPointF(0, raw.y())
+        return QPointF(raw)
+
+    def _apply_panel_grab(self):
+        state = self._panel_grab
+        if state is None:
+            return
+        if state["scene"] is not self.scene() or any(
+            panel.scene() is not state["scene"]
+            for panel in state["initial"]
+        ):
+            self.finish_panel_grab(commit=False)
+            return
+        delta = self._panel_grab_delta()
+        state["delta"] = delta
+        for panel, original in state["initial"].items():
+            panel.setPos(original + delta)
+        self.viewport().update()
+        axis = state["axis"] or "XY"
+        self.window().statusBar().showMessage(
+            f"G移動 [{axis.upper()}]  X={delta.x():+.2f}px Y={delta.y():+.2f}px  "
+            "左クリック/Enter=確定  Esc/右クリック=取消"
+        )
+
+    def finish_panel_grab(self, commit):
+        state = self._panel_grab
+        if state is None:
+            return False
+        self._panel_grab = None
+        self.unsetCursor()
+        delta = state["delta"]
+        changed = abs(delta.x()) > 1e-6 or abs(delta.y()) > 1e-6
+        if not commit or not changed:
+            for panel, original in state["initial"].items():
+                if panel.scene() is state["scene"]:
+                    panel.setPos(original)
+            self.viewport().update()
+            if not commit:
+                self.window().statusBar().showMessage("G移動をキャンセルしました", 1600)
+            return False
+        editor = self.window()
+        if hasattr(editor, "record_history"):
+            editor.record_history()
+        editor.statusBar().showMessage("G移動を確定しました", 1600)
+        return True
+
+    def cancel_panel_grab(self):
+        return self.finish_panel_grab(commit=False)
+
+    def _handle_panel_grab_key(self, event):
+        if self._panel_grab is None:
+            return False
+        key = event.key()
+        modifiers = event.modifiers()
+        if key == Qt.Key_Escape:
+            self.finish_panel_grab(commit=False)
+        elif key in (Qt.Key_Return, Qt.Key_Enter):
+            self.finish_panel_grab(commit=True)
+        elif not event.isAutoRepeat() and modifiers in (Qt.NoModifier, Qt.ShiftModifier):
+            state = self._panel_grab
+            if key in (Qt.Key_X, Qt.Key_Y):
+                state["axis"] = "x" if key == Qt.Key_X else "y"
+                self._apply_panel_grab()
+            elif Qt.Key_0 <= key <= Qt.Key_9:
+                if len(state["digits"]) < 12:
+                    state["digits"] += str(key - Qt.Key_0)
+                    self._apply_panel_grab()
+            elif key == Qt.Key_Period:
+                if "." not in state["digits"]:
+                    state["digits"] += "."
+                    self._apply_panel_grab()
+            elif key == Qt.Key_Minus:
+                # Sign toggles even after digits, e.g. G 25 - => -25.
+                state["negative"] = not state["negative"]
+                self._apply_panel_grab()
+            elif key == Qt.Key_Backspace:
+                state["digits"] = state["digits"][:-1]
+                if not state["digits"]:
+                    state["negative"] = False
+                self._apply_panel_grab()
+        # Consume *all* keys while in grab mode. In particular X is an axis
+        # key, never deletion, and typing cannot trigger unrelated actions.
+        event.accept()
+        return True
+
     def keyPressEvent(self, event):
+        if self._handle_panel_grab_key(event):
+            return
         if self.region_mosaic_mode and event.key() == Qt.Key_Escape:
             self.cancel_region_mosaic()
             self.window().statusBar().showMessage("範囲モザイクをキャンセルしました", 2500)
             event.accept()
             return
 
-        # Stage B0 of the Blender-style panel workflow. Canvas-only
-        # shortcuts must never intercept typing inside an editable text item.
-        scene = self.scene()
-        focused = scene.focusItem() if scene is not None else None
-        editing_text = (
-            isinstance(focused, QGraphicsTextItem)
-            and bool(focused.textInteractionFlags() & Qt.TextEditorInteraction)
-        )
         if (
             not self.region_mosaic_mode
-            and not editing_text
+            and not self._is_editing_canvas_text()
             and not event.isAutoRepeat()
-            and event.modifiers() == Qt.ShiftModifier
         ):
             editor = self.window()
-            if event.key() == Qt.Key_A and hasattr(editor, "add_free_panel"):
-                editor.add_free_panel()
-                editor.statusBar().showMessage("Shift+A: 空のコマを追加しました", 2200)
-                event.accept()
-                return
-            if (
-                event.key() == Qt.Key_D
-                and hasattr(editor, "duplicate_selected_panels")
-                and editor.duplicate_selected_panels()
-            ):
-                editor.statusBar().showMessage("Shift+D: 選択コマを複製しました", 2200)
-                event.accept()
-                return
+            if event.modifiers() == Qt.NoModifier:
+                if event.key() == Qt.Key_G:
+                    self.begin_panel_grab()
+                    event.accept()
+                    return
+                if event.key() == Qt.Key_X:
+                    if hasattr(editor, "delete_selected_panels"):
+                        editor.delete_selected_panels()
+                    event.accept()
+                    return
+            if event.modifiers() == Qt.ShiftModifier:
+                if event.key() == Qt.Key_A and hasattr(editor, "add_free_panel"):
+                    editor.add_free_panel()
+                    editor.statusBar().showMessage("Shift+A: 空のコマを追加しました", 2200)
+                    event.accept()
+                    return
+                if (
+                    event.key() == Qt.Key_D
+                    and hasattr(editor, "duplicate_selected_panels")
+                    and editor.duplicate_selected_panels()
+                ):
+                    editor.statusBar().showMessage("Shift+D: 選択コマを複製しました", 2200)
+                    event.accept()
+                    return
 
         super().keyPressEvent(event)
 
@@ -4191,6 +4391,9 @@ class MangaEditor(QMainWindow):
         )
         self.view.addAction(self.corner_tab_action)
         self.main_splitter.addWidget(self.view)
+        self.mode_combo.currentIndexChanged.connect(
+            lambda _idx: self.view.cancel_panel_grab()
+        )
 
         right = QWidget()
         right.setMinimumWidth(310)
@@ -6127,6 +6330,7 @@ class MangaEditor(QMainWindow):
             return
 
         previous = self.current_page_index
+        self.view.cancel_panel_grab()
         if previous != row:
             self._commit_page_snapshot(previous)
         self.current_page_index = row
@@ -7659,6 +7863,23 @@ class MangaEditor(QMainWindow):
             item.setZValue(item.zValue()+delta)
         self.record_history()
         self.refresh_layer_list()
+
+    def delete_selected_panels(self):
+        """X shortcut removes only selected panels, not text or images."""
+        scene = self.current_scene()
+        if scene is None:
+            return False
+        panels = [
+            item for item in self.selected()
+            if isinstance(item, PanelItem) and item.parentItem() is None
+        ]
+        if not panels:
+            return False
+        for panel in panels:
+            scene.removeItem(panel)
+        self.record_history()
+        self.statusBar().showMessage(f"X: {len(panels)}個のコマを削除しました", 2000)
+        return True
 
     def delete_selected(self):
         scene = self.current_scene()
