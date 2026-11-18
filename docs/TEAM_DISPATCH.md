@@ -57,7 +57,7 @@ This file defines the process; Team A updates the issues as assignments rotate.
 ### Team A
 Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/2
 Status: ACTIVE  
-Purpose: integration, baseline maintenance and active Issue #5 (Blender-style panel editing; PR #7 merged, B2 in progress).
+Purpose: integration, baseline maintenance and active Issue #5 (Blender-style panel editing; PR #8 merged; P2 Ctrl+R preview in progress).
 
 ### Team B
 Issue: https://github.com/mibesamiti-png/Manga-Peta-Editor/issues/3
