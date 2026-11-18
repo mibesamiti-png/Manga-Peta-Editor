@@ -15,6 +15,8 @@ from app import CanvasView, MangaEditor, PanelItem
 
 class SplitEditorHarness(QMainWindow):
     _valid_panel_quad = MangaEditor._valid_panel_quad
+    _valid_panel_polygon = staticmethod(MangaEditor._valid_panel_polygon)
+    _panel_shape_valid = MangaEditor._panel_shape_valid
     _segments_intersect = staticmethod(MangaEditor._segments_intersect)
     _freeform_strip_cells = MangaEditor._freeform_strip_cells
     _biased_fraction = staticmethod(MangaEditor._biased_fraction)
