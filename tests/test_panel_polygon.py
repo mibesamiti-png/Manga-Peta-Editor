@@ -10,7 +10,7 @@ from PySide6.QtGui import QColor, QImage, QKeyEvent, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication, QComboBox, QGraphicsScene, QMainWindow
 
 from app import CanvasView, MangaEditor, PanelItem
-from panel_polygon import edge_midpoint, valid_polygon
+from app import edge_midpoint, valid_polygon
 
 
 class PanelPolygonGeometryTests(unittest.TestCase):
