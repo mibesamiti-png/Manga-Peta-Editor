@@ -86,3 +86,13 @@ Release after each verified batch if useful; never mark a batch complete based s
 - Existing methods: `add_free_panel`, `delete_selected`, `duplicate_selection`, `split_selected_panel_n`, `begin_corner_group_drag`, `update_corner_group_drag`, `end_corner_group_drag`.
 - `PanelItem` currently accepts `custom_points` only when exactly 4 points. Edge loops and clamping assume 4. Do **not** merely change the count guard; P3 requires broader conversion.
 - Keep `Ctrl+D` (existing generic duplicate) active. `Shift+D` is an additional panel-oriented candidate.
+
+## B1 implementation note (pending verification)
+
+- Branch: `team-a/panel-grab-b1`
+- Initial scope: selected **whole panels**, `G` move, free/X/Y constrained mouse movement, signed numeric offsets (`G 25` = +25,+25), `-` before or after digits, Enter/left-click commit, Esc/right-click cancel.
+- `X` when idle deletes **only selected panels**. While G is active it is exclusively axis selection and cannot delete.
+- Preview updates item positions without history. One history entry is recorded on non-zero commit; cancellation restores original positions.
+- Modal previews are cancelled when scene/page changes, focus leaves canvas, or editor mode changes.
+- `G` on enabled corner-edit handles deliberately displays a not-yet-supported notice; vertex/edge movement is B2, and **is not claimed in B1**.
+- Synthetic offscreen regressions are in `tests/test_panel_grab.py`. Windows interactive GUI validation remains required.
