@@ -1779,6 +1779,7 @@ class CanvasView(QGraphicsView):
         self._forced_text_drag_start_pos = QPointF()
         self._forced_text_drag_moved = False
         self._panel_grab = None
+        self._panel_split_preview = None
         self.setMouseTracking(True)
         self.viewport().setMouseTracking(True)
 
@@ -1786,11 +1787,15 @@ class CanvasView(QGraphicsView):
         # Page switching must not accidentally save transient grab previews.
         if getattr(self, "_panel_grab", None) is not None:
             self.finish_panel_grab(commit=False)
+        if getattr(self, "_panel_split_preview", None) is not None:
+            self.finish_panel_split(commit=False)
         super().setScene(scene)
 
     def focusOutEvent(self, event):
         if self._panel_grab is not None:
             self.finish_panel_grab(commit=False)
+        if self._panel_split_preview is not None:
+            self.finish_panel_split(commit=False)
         super().focusOutEvent(event)
 
     def drawBackground(self, painter, rect):
@@ -1875,9 +1880,17 @@ class CanvasView(QGraphicsView):
                 else:
                     br = item.sceneBoundingRect()
                     painter.drawRect(br)
+        self._draw_panel_split_preview(painter)
         painter.restore()
 
     def wheelEvent(self, event):
+        if self._panel_split_preview is not None:
+            dy = event.angleDelta().y()
+            if dy:
+                steps = max(1, abs(dy) // 120)
+                self.change_panel_split_count(steps if dy > 0 else -steps)
+            event.accept()
+            return
         if self._panel_grab is not None:
             # Prevent normal canvas zoom/scroll from interfering with G.
             event.accept()
@@ -2036,6 +2049,13 @@ class CanvasView(QGraphicsView):
         return None
 
     def mousePressEvent(self, event):
+        if self._panel_split_preview is not None:
+            if event.button() == Qt.LeftButton:
+                self.finish_panel_split(commit=True)
+            elif event.button() == Qt.RightButton:
+                self.finish_panel_split(commit=False)
+            event.accept()
+            return
         if self._panel_grab is not None:
             if event.button() == Qt.LeftButton:
                 self.finish_panel_grab(commit=True)
@@ -2143,6 +2163,9 @@ class CanvasView(QGraphicsView):
         super().mousePressEvent(event)
 
     def contextMenuEvent(self, event):
+        if self._panel_split_preview is not None:
+            event.accept()
+            return
         if self._panel_grab is not None:
             event.accept()
             return
@@ -2161,6 +2184,10 @@ class CanvasView(QGraphicsView):
         super().contextMenuEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self._panel_split_preview is not None:
+            self.update_panel_split_orientation(self.mapToScene(event.position().toPoint()))
+            event.accept()
+            return
         if self._panel_grab is not None:
             grab = self._panel_grab
             mouse = self.mapToScene(event.position().toPoint())
@@ -2205,6 +2232,9 @@ class CanvasView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
+        if self._panel_split_preview is not None:
+            event.accept()
+            return
         if self._panel_grab is not None:
             event.accept()
             return
@@ -2287,6 +2317,170 @@ class CanvasView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
 
+    def _split_preview_lines(self, panel, direction, count):
+        """Centerlines of cut gutters; interpolated across existing quad."""
+        pts = panel.corner_points()
+        lines = []
+        for i in range(1, count):
+            t = i / count
+            if direction == "vertical":
+                a = QPointF(pts[0].x()+(pts[1].x()-pts[0].x())*t,
+                            pts[0].y()+(pts[1].y()-pts[0].y())*t)
+                b = QPointF(pts[3].x()+(pts[2].x()-pts[3].x())*t,
+                            pts[3].y()+(pts[2].y()-pts[3].y())*t)
+            else:
+                a = QPointF(pts[0].x()+(pts[3].x()-pts[0].x())*t,
+                            pts[0].y()+(pts[3].y()-pts[0].y())*t)
+                b = QPointF(pts[1].x()+(pts[2].x()-pts[1].x())*t,
+                            pts[1].y()+(pts[2].y()-pts[1].y())*t)
+            lines.append((panel.mapToScene(a), panel.mapToScene(b)))
+        return lines
+
+    def _panel_split_preview_valid(self):
+        state = self._panel_split_preview
+        if state is None or state["scene"] is not self.scene():
+            return False
+        panel = state["panel"]
+        if panel.scene() is not state["scene"] or not panel.isSelected():
+            return False
+        editor = self.window()
+        direction, count = state["direction"], state["count"]
+        gap = float(editor.panel_split_gap_spin.value()) if hasattr(editor, "panel_split_gap_spin") else 24.0
+        if panel.custom_points is not None or abs(panel.skew) > 1e-9:
+            pts = panel.corner_points()
+            if not editor._valid_panel_quad(pts):
+                return False
+            cells = editor._freeform_strip_cells(pts, direction, count, gap)
+            return bool(cells) and all(editor._valid_panel_quad(cell) for cell in cells)
+        rect = panel.rect()
+        size = rect.width() if direction == "vertical" else rect.height()
+        return (size - gap*(count-1)) / count >= 48.0
+
+    def _draw_panel_split_preview(self, painter):
+        state = self._panel_split_preview
+        if state is None or state["scene"] is not self.scene():
+            return
+        panel = state["panel"]
+        if panel.scene() is not self.scene():
+            return
+        valid = self._panel_split_preview_valid()
+        pen = QPen(QColor("#ff9f1a" if valid else "#ef4444"), 4, Qt.DashLine)
+        pen.setCosmetic(True)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        for a, b in self._split_preview_lines(panel, state["direction"], state["count"]):
+            painter.drawLine(a, b)
+        painter.drawPolygon(QPolygonF([panel.mapToScene(p) for p in panel.corner_points()]))
+
+    def _update_panel_split_status(self):
+        state = self._panel_split_preview
+        if state is None:
+            return
+        side = "左右" if state["direction"] == "vertical" else "上下"
+        invalid = "" if self._panel_split_preview_valid() else "（分割不可：幅・隙間・形状を確認）"
+        self.window().statusBar().showMessage(
+            f"Ctrl+R: {side} {state['count']}分割 {invalid} / "
+            "マウス=方向  ホイール=分割数  左クリック=確定  Esc/右クリック=取消"
+        )
+        self.viewport().update()
+
+    def begin_panel_split(self):
+        """Preview-only Ctrl+R strip splitting for a single valid quad."""
+        if self._panel_split_preview is not None or self._panel_grab is not None or self.region_mosaic_mode:
+            return False
+        editor = self.window()
+        mode = editor.mode_combo.currentData() if hasattr(editor, "mode_combo") else "select"
+        if mode not in ("select", "panel"):
+            return False
+        scene = self.scene()
+        panels = [i for i in scene.selectedItems()
+                  if isinstance(i, PanelItem) and i.parentItem() is None] if scene else []
+        if len(panels) != 1:
+            editor.statusBar().showMessage("Ctrl+R: コマを1つ選択してください", 2500)
+            return False
+        panel = panels[0]
+        corners = panel.corner_points()
+        if len(corners) != 4:
+            editor.statusBar().showMessage("Ctrl+R: 多角形の2頂点分割はP4で対応", 3000)
+            return False
+        if panel.corner_edit_enabled and set(panel._selected_corner_indices) in ({0, 2}, {1, 3}):
+            editor.statusBar().showMessage("Ctrl+R: 対角2頂点分割はP4で対応", 3000)
+            return False
+        if not editor._valid_panel_quad(corners):
+            editor.statusBar().showMessage("Ctrl+R: 無効な四角形のため分割不可", 3000)
+            return False
+        preferred = editor.panel_split_layout.currentData() if hasattr(editor, "panel_split_layout") else "vertical"
+        direction = preferred if preferred in ("vertical", "horizontal") else "vertical"
+        count = editor.panel_split_count_spin.value() if hasattr(editor, "panel_split_count_spin") else 2
+        cursor_local = self.viewport().mapFromGlobal(QCursor.pos())
+        self._panel_split_preview = {
+            "scene": scene,
+            "panel": panel,
+            "anchor": panel.mapFromScene(self.mapToScene(cursor_local)),
+            "direction": direction,
+            "count": max(2, min(12, int(count))),
+        }
+        self.setCursor(Qt.CrossCursor)
+        self._update_panel_split_status()
+        return True
+
+    def update_panel_split_orientation(self, scene_pos):
+        state = self._panel_split_preview
+        if state is None:
+            return
+        panel = state["panel"]
+        if panel.scene() is not self.scene() or not panel.isSelected():
+            self.finish_panel_split(commit=False)
+            return
+        local = panel.mapFromScene(scene_pos)
+        dx = local.x()-state["anchor"].x()
+        dy = local.y()-state["anchor"].y()
+        if max(abs(dx), abs(dy)) >= 4:
+            state["direction"] = "vertical" if abs(dx) >= abs(dy) else "horizontal"
+        self._update_panel_split_status()
+
+    def change_panel_split_count(self, steps):
+        state = self._panel_split_preview
+        if state is None:
+            return
+        state["count"] = max(2, min(12, state["count"] + int(steps)))
+        self._update_panel_split_status()
+
+    def finish_panel_split(self, commit):
+        state = self._panel_split_preview
+        if state is None:
+            return False
+        if commit and not self._panel_split_preview_valid():
+            self._update_panel_split_status()
+            return False
+        self._panel_split_preview = None
+        self.unsetCursor()
+        self.viewport().update()
+        if not commit:
+            self.window().statusBar().showMessage("Ctrl+R: 分割をキャンセルしました", 1600)
+            return False
+        editor = self.window()
+        if hasattr(editor, "panel_split_count_spin"):
+            editor.panel_split_count_spin.setValue(state["count"])
+        if hasattr(editor, "panel_split_layout"):
+            idx = editor.panel_split_layout.findData(state["direction"])
+            if idx >= 0:
+                editor.panel_split_layout.setCurrentIndex(idx)
+        # Existing split core handles gutter, image inheritance and single Undo.
+        editor.split_selected_panel_n(state["direction"], count=state["count"])
+        return True
+
+    def cancel_panel_split(self):
+        return self.finish_panel_split(commit=False)
+
+    def _handle_panel_split_key(self, event):
+        if self._panel_split_preview is None:
+            return False
+        if event.key() == Qt.Key_Escape:
+            self.finish_panel_split(commit=False)
+        event.accept()  # Never propagate destructive keys during preview.
+        return True
+
     def _is_editing_canvas_text(self):
         scene = self.scene()
         item = scene.focusItem() if scene is not None else None
@@ -2297,7 +2491,7 @@ class CanvasView(QGraphicsView):
 
     def begin_panel_grab(self):
         """Start non-destructive G preview for selected panels or edit handles."""
-        if self._panel_grab is not None or self.region_mosaic_mode:
+        if self._panel_grab is not None or self._panel_split_preview is not None or self.region_mosaic_mode:
             return False
         editor = self.window()
         mode = editor.mode_combo.currentData() if hasattr(editor, "mode_combo") else "select"
@@ -2522,6 +2716,8 @@ class CanvasView(QGraphicsView):
         return True
 
     def keyPressEvent(self, event):
+        if self._handle_panel_split_key(event):
+            return
         if self._handle_panel_grab_key(event):
             return
         if self.region_mosaic_mode and event.key() == Qt.Key_Escape:
@@ -2536,6 +2732,10 @@ class CanvasView(QGraphicsView):
             and not event.isAutoRepeat()
         ):
             editor = self.window()
+            if event.modifiers() == Qt.ControlModifier and event.key() == Qt.Key_R:
+                self.begin_panel_split()
+                event.accept()
+                return
             if event.modifiers() == Qt.NoModifier:
                 if event.key() == Qt.Key_G:
                     self.begin_panel_grab()
@@ -4468,7 +4668,7 @@ class MangaEditor(QMainWindow):
         self.view.addAction(self.corner_tab_action)
         self.main_splitter.addWidget(self.view)
         self.mode_combo.currentIndexChanged.connect(
-            lambda _idx: self.view.cancel_panel_grab()
+            lambda _idx: (self.view.cancel_panel_grab(), self.view.cancel_panel_split())
         )
 
         right = QWidget()
@@ -6408,6 +6608,7 @@ class MangaEditor(QMainWindow):
 
         previous = self.current_page_index
         self.view.cancel_panel_grab()
+        self.view.cancel_panel_split()
         if previous != row:
             self._commit_page_snapshot(previous)
         self.current_page_index = row
