@@ -2597,12 +2597,12 @@ class CanvasView(QGraphicsView):
             return points
 
         proposed = candidate(1.0)
-        if editor._valid_panel_quad(proposed):
+        if editor._panel_shape_valid(proposed):
             return proposed
         lo, hi = 0.0, 1.0
         for _ in range(24):
             mid = (lo + hi) / 2.0
-            if editor._valid_panel_quad(candidate(mid)):
+            if editor._panel_shape_valid(candidate(mid)):
                 lo = mid
             else:
                 hi = mid
@@ -2746,6 +2746,11 @@ class CanvasView(QGraphicsView):
             if event.modifiers() == Qt.NoModifier:
                 if event.key() == Qt.Key_G:
                     self.begin_panel_grab()
+                    event.accept()
+                    return
+                if event.key() == Qt.Key_E:
+                    if hasattr(editor, "insert_selected_panel_edge_vertex"):
+                        editor.insert_selected_panel_edge_vertex()
                     event.accept()
                     return
                 if event.key() == Qt.Key_X:
@@ -4838,7 +4843,7 @@ class MangaEditor(QMainWindow):
             "Ctrl+○クリック=複数頂点 / Shift+辺クリック=辺の2頂点を選択。\n"
             "選択中の頂点・辺はオレンジ。\n"
             "G=選択頂点/辺を移動（X/Yで軸指定・数値px） / "
-            "Shift+A=空コマ追加 / Shift+D=複製。"
+            "E=選択辺の中点に頂点追加 / Shift+A=空コマ追加 / Shift+D=複製。"
         ))
         panel_lay.addWidget(corner_box)
 
@@ -7003,6 +7008,56 @@ class MangaEditor(QMainWindow):
             if indices == {edge_idx, (edge_idx + 1) % n}:
                 return edge_idx
         return None
+
+    def insert_selected_panel_edge_vertex(self):
+        """E: split one selected polygon edge at its midpoint, preserving outline."""
+        scene = self.current_scene()
+        if scene is None:
+            return False
+        selected = [
+            p for p in self.selected()
+            if isinstance(p, PanelItem) and p.parentItem() is None
+            and p.corner_edit_enabled and p.scene() is scene
+        ]
+        if len(selected) != 1:
+            self.statusBar().showMessage(
+                "E: 四隅編集ONのコマを1つ選び、Shift+辺クリックしてください", 3000
+            )
+            return False
+
+        panel = selected[0]
+        edge = self._selected_panel_edge_index(panel)
+        if edge is None:
+            self.statusBar().showMessage(
+                "E: Shift+辺クリックで対象の辺（隣接する2頂点）を選択してください", 3000
+            )
+            return False
+        points = panel.corner_points()
+        if not self._panel_shape_valid(points):
+            self.statusBar().showMessage("E: コマ形状が無効なため頂点を追加できません", 3000)
+            return False
+        mx, my = edge_midpoint(points, edge)
+        new_vertex = QPointF(mx, my)
+        updated = [QPointF(p) for p in points]
+        updated.insert(edge + 1, new_vertex)
+        if not self._valid_panel_polygon(updated):
+            self.statusBar().showMessage(
+                "E: 辺が短すぎるか、追加後の形状が無効になります", 3000
+            )
+            return False
+
+        panel.prepareGeometryChange()
+        panel.custom_points = updated
+        panel.skew = 0.0
+        panel._selected_corner_indices = {edge + 1}
+        panel.sync_transform_origin_to_visual_center()
+        panel.update()
+        self.record_history()
+        self.view.viewport().update()
+        self.statusBar().showMessage(
+            f"E: 辺の中点に頂点を追加（{len(updated)}頂点）。Gで移動できます", 2600
+        )
+        return True
 
     @staticmethod
     def _biased_fraction(x, bias_percent):
