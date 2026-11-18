@@ -215,11 +215,15 @@ class PanelSplitTests(unittest.TestCase):
         self.assertIsNone(self.view._panel_split_preview)
         self.assertEqual(self.editor.history_calls, 0)
 
-    def test_diagonal_vertex_selection_waits_for_p4(self):
+    def test_diagonal_vertex_selection_enters_chord_preview(self):
         self.panel.enable_freeform()
         self.panel._selected_corner_indices = {0, 2}
         self.press(Qt.Key_R, Qt.ControlModifier)
-        self.assertIsNone(self.view._panel_split_preview)
+        state = self.view._panel_split_preview
+        self.assertIsNotNone(state)
+        self.assertEqual(state["kind"], "chord")
+        self.assertEqual(state["vertices"], (0, 2))
+        self.assertEqual(self.editor.history_calls, 0)
 
 
 if __name__ == "__main__":
