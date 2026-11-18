@@ -20,6 +20,9 @@ from app import CanvasView, MangaEditor, PanelItem
 
 class EditorHarness(QMainWindow):
     delete_selected_panels = MangaEditor.delete_selected_panels
+    _scene_delta_to_local = MangaEditor._scene_delta_to_local
+    _valid_panel_quad = MangaEditor._valid_panel_quad
+    _segments_intersect = staticmethod(MangaEditor._segments_intersect)
 
     def __init__(self):
         super().__init__()
@@ -175,8 +178,90 @@ class PanelGrabTests(unittest.TestCase):
         self.key(Qt.Key_X)
         self.assertIs(self.panel.scene(), self.editor.scene)
 
-    def test_corner_edit_refuses_whole_panel_grab(self):
+    def test_edit_vertex_g_x_numeric_moves_only_selected_vertex(self):
         self.panel.set_corner_edit_enabled(True)
+        self.panel._selected_corner_indices = {0}
+        original = self.panel.corner_points()
+        self.grab()
+        self.assertEqual(self.editor.view._panel_grab["kind"], "handles")
+        self.key(Qt.Key_X)
+        self.key(Qt.Key_1)
+        self.key(Qt.Key_0)
+        moved = self.panel.corner_points()
+        self.assertAlmostEqual(moved[0].x(), original[0].x() + 10)
+        self.assertAlmostEqual(moved[0].y(), original[0].y())
+        for i in (1, 2, 3):
+            self.assertEqual(moved[i], original[i])
+        self.assert_panel_at(20, 30)
+        self.key(Qt.Key_Return)
+        self.assertEqual(self.editor.history_calls, 1)
+
+    def test_edit_edge_g_y_numeric_moves_two_vertices_rigidly(self):
+        self.panel.set_corner_edit_enabled(True)
+        self.panel._selected_corner_indices = {0, 1}
+        original = self.panel.corner_points()
+        self.grab()
+        self.key(Qt.Key_Y)
+        self.key(Qt.Key_2)
+        self.key(Qt.Key_0)
+        moved = self.panel.corner_points()
+        for i in (0, 1):
+            self.assertAlmostEqual(moved[i].y(), original[i].y() + 20)
+            self.assertAlmostEqual(moved[i].x(), original[i].x())
+        for i in (2, 3):
+            self.assertEqual(moved[i], original[i])
+        self.assertTrue(self.editor._valid_panel_quad(moved))
+        self.key(Qt.Key_Return)
+        self.assertEqual(self.editor.history_calls, 1)
+
+    def test_edit_handles_invalid_motion_is_bounded(self):
+        self.panel.set_corner_edit_enabled(True)
+        self.panel._selected_corner_indices = {0}
+        original = self.panel.corner_points()
+        self.grab()
+        self.key(Qt.Key_X)
+        for digit in (Qt.Key_9, Qt.Key_9, Qt.Key_9):
+            self.key(digit)
+        moved = self.panel.corner_points()
+        self.assertTrue(self.editor._valid_panel_quad(moved))
+        self.assertLess(moved[0].x(), original[1].x())
+        self.key(Qt.Key_Escape)
+        self.assertEqual(self.panel.corner_points(), original)
+        self.assertEqual(self.editor.history_calls, 0)
+
+    def test_edit_handle_cancel_restores_without_history(self):
+        self.panel.set_corner_edit_enabled(True)
+        self.panel._selected_corner_indices = {2}
+        original = self.panel.corner_points()
+        self.grab()
+        self.key(Qt.Key_Minus)
+        self.key(Qt.Key_1)
+        self.key(Qt.Key_0)
+        self.assertNotEqual(self.panel.corner_points(), original)
+        self.key(Qt.Key_Escape)
+        self.assertEqual(self.panel.corner_points(), original)
+        self.assert_panel_at(20, 30)
+        self.assertEqual(self.editor.history_calls, 0)
+
+    def test_two_panels_selected_handles_move_as_group(self):
+        other = self.editor.add_panel(170, 180)
+        self.panel.set_corner_edit_enabled(True)
+        other.set_corner_edit_enabled(True)
+        self.panel._selected_corner_indices = {0}
+        other._selected_corner_indices = {2}
+        a = self.panel.corner_points()
+        b = other.corner_points()
+        self.grab()
+        self.key(Qt.Key_X)
+        self.key(Qt.Key_5)
+        self.assertAlmostEqual(self.panel.corner_points()[0].x(), a[0].x() + 5)
+        self.assertAlmostEqual(other.corner_points()[2].x(), b[2].x() + 5)
+        self.key(Qt.Key_Return)
+        self.assertEqual(self.editor.history_calls, 1)
+
+    def test_corner_edit_without_handles_does_not_grab(self):
+        self.panel.set_corner_edit_enabled(True)
+        self.panel._selected_corner_indices.clear()
         self.key(Qt.Key_G)
         self.assertIsNone(self.editor.view._panel_grab)
         self.assert_panel_at(20, 30)
