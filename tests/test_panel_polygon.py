@@ -65,6 +65,7 @@ class EditorHarness(QMainWindow):
         super().__init__()
         self.mode_combo = QComboBox(self)
         self.mode_combo.addItem("コマ", "panel")
+        self.mode_combo.addItem("効果", "effect")
         self.scene = QGraphicsScene(self)
         self.view = CanvasView(self)
         self.setCentralWidget(self.view)
@@ -201,8 +202,15 @@ class PanelPolygonIntegrationTests(unittest.TestCase):
         self.assertEqual(self.panel.corner_points()[1], QPointF(160,0))
         self.assertEqual(self.editor.history_calls, 1)
 
-    def test_concat_insert_cannot_be_used_in_text_mode(self):
-        self.editor.mode_combo.setCurrentIndex(0)
+    def test_e_does_not_activate_in_effect_mode(self):
+        self.select_edge(0, 1)
+        self.editor.mode_combo.setCurrentIndex(1)
+        before = self.panel.serialize()
+        self.key(Qt.Key_E)
+        self.assertEqual(self.panel.serialize(), before)
+        self.assertEqual(self.editor.history_calls, 0)
+
+    def test_e_cannot_run_during_mosaic_selection(self):
         self.select_edge(0,1)
         self.editor.view.region_mosaic_mode = True
         old = self.panel.serialize()
