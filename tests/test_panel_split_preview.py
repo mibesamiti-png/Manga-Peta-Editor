@@ -15,6 +15,8 @@ from app import CanvasView, MangaEditor, PanelItem
 
 class SplitEditorHarness(QMainWindow):
     _valid_panel_quad = MangaEditor._valid_panel_quad
+    _valid_panel_polygon = staticmethod(MangaEditor._valid_panel_polygon)
+    _panel_shape_valid = MangaEditor._panel_shape_valid
     _segments_intersect = staticmethod(MangaEditor._segments_intersect)
     _freeform_strip_cells = MangaEditor._freeform_strip_cells
     _biased_fraction = staticmethod(MangaEditor._biased_fraction)
@@ -213,11 +215,15 @@ class PanelSplitTests(unittest.TestCase):
         self.assertIsNone(self.view._panel_split_preview)
         self.assertEqual(self.editor.history_calls, 0)
 
-    def test_diagonal_vertex_selection_waits_for_p4(self):
+    def test_diagonal_vertex_selection_enters_chord_preview(self):
         self.panel.enable_freeform()
         self.panel._selected_corner_indices = {0, 2}
         self.press(Qt.Key_R, Qt.ControlModifier)
-        self.assertIsNone(self.view._panel_split_preview)
+        state = self.view._panel_split_preview
+        self.assertIsNotNone(state)
+        self.assertEqual(state["kind"], "chord")
+        self.assertEqual(state["vertices"], (0, 2))
+        self.assertEqual(self.editor.history_calls, 0)
 
 
 if __name__ == "__main__":

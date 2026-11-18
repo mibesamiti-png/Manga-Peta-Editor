@@ -125,6 +125,129 @@ def valid_polygon(points, min_edge_length=12.0, min_area_twice=576.0):
     return True
 
 
+def _strictly_inside_polygon(point, points):
+    """Ray-cast strict interior: boundary contact is never a valid chord."""
+    px, py = xy(point)
+    polygon = [xy(p) for p in points]
+    inside = False
+    for i in range(len(polygon)):
+        a, b = polygon[i], polygon[(i+1) % len(polygon)]
+        if abs(_cross(a, b, (px, py))) <= 1e-7 and _on_segment(a, b, (px, py), 1e-7):
+            return False
+        if (a[1] > py) != (b[1] > py):
+            ix = a[0] + (py-a[1]) * (b[0]-a[0]) / (b[1]-a[1])
+            if ix > px:
+                inside = not inside
+    return inside
+
+
+def _chord_inset_chain(chain, a, b, half_gap):
+    """Trim only the two boundary approaches to a chord, leaving rest intact.
+
+    The safe subset here is a line-separable child. Concave cases that cross
+    the infinite chord-offset line more than once are deliberately rejected
+    for positive gutters instead of silently discarding disconnected areas.
+    A zero gap supports such chords without an offset.
+    """
+    if half_gap <= 1e-9:
+        return list(chain)
+    length = math.hypot(b[0]-a[0], b[1]-a[1])
+    signed = [_cross(a, b, p) / length for p in chain]
+    inner = [d for d in signed[1:-1] if abs(d) > 1e-7]
+    if not inner:
+        return None
+    sign = 1.0 if inner[0] > 0 else -1.0
+    distances = [d*sign for d in signed]
+    if any(d < -1e-7 for d in distances[1:-1]):
+        return None
+    keep = [i for i in range(1, len(chain)-1) if distances[i] >= half_gap-1e-7]
+    if not keep or keep != list(range(keep[0], keep[-1]+1)):
+        return None
+    first, last = keep[0], keep[-1]
+    def at_offset(p, q, dp, dq):
+        if abs(dq-dp) <= 1e-9:
+            return q
+        ratio = max(0.0, min(1.0, (half_gap-dp)/(dq-dp)))
+        return (p[0]+(q[0]-p[0])*ratio, p[1]+(q[1]-p[1])*ratio)
+
+    left = at_offset(chain[first-1], chain[first], distances[first-1], distances[first])
+    right = at_offset(chain[last], chain[last+1], distances[last], distances[last+1])
+    middle = list(chain[first:last+1])
+    # Intersections that coincide with existing vertices must not introduce
+    # duplicate/zero-length edges.
+    if math.hypot(left[0]-middle[0][0], left[1]-middle[0][1]) < 1e-6:
+        middle.pop(0)
+    if middle and math.hypot(right[0]-middle[-1][0], right[1]-middle[-1][1]) < 1e-6:
+        middle.pop()
+    result = [left, *middle, right]
+    if len(result) < 3 or not _strictly_inside_polygon(
+        ((left[0]+right[0])/2, (left[1]+right[1])/2), chain
+    ):
+        return None
+    return result
+
+
+def split_polygon_chord(points, index_a, index_b, gap=0.0,
+                        min_edge_length=12.0, min_area_twice=576.0):
+    """Return exactly two child outlines for a valid interior vertex chord.
+
+    Returns [] for adjacent vertices, boundary crossings, degenerate pieces,
+    too-large gutters, or unrepresentable concave inset topology. For gap>0,
+    both cut edges are shifted by gap/2 into their own region, giving the
+    existing gutter distance with no child overlap. No source points change.
+    """
+    if not isinstance(points, (list, tuple)) or len(points) < 4:
+        return []
+    try:
+        vertices = [xy(p) for p in points]
+        n = len(vertices)
+        ia, ib = int(index_a), int(index_b)
+        gutter = float(gap)
+    except (ValueError, TypeError, IndexError, OverflowError):
+        return []
+    if (not math.isfinite(gutter) or gutter < 0
+            or ia == ib or not (0 <= ia < n and 0 <= ib < n)
+            or (ia-ib) % n in (1, n-1)
+            or not valid_polygon(vertices, min_edge_length, min_area_twice)):
+        return []
+    a, b = vertices[ia], vertices[ib]
+
+    # Every intersection with a nonincident polygon edge invalidates a cut,
+    # including a tangency or a pass through another vertex.
+    incident = {(ia-1) % n, ia, (ib-1) % n, ib}
+    for edge in range(n):
+        c, d = vertices[edge], vertices[(edge+1) % n]
+        if edge in incident:
+            continue
+        if _segments_touch_or_cross(a, b, c, d, 1e-7):
+            return []
+    for t in (0.001, 0.05, 0.25, 0.5, 0.75, 0.95, 0.999):
+        sample = (a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t)
+        if not _strictly_inside_polygon(sample, vertices):
+            return []
+
+    def boundary_chain(start, end):
+        result = [vertices[start]]
+        idx = start
+        while idx != end:
+            idx = (idx+1) % n
+            result.append(vertices[idx])
+        return result
+
+    chains = [boundary_chain(ia, ib), boundary_chain(ib, ia)]
+    if not all(valid_polygon(chain, min_edge_length, min_area_twice)
+               for chain in chains):
+        return []
+    if gutter <= 1e-9:
+        return chains
+
+    inset = [_chord_inset_chain(chain, a, b, gutter/2) for chain in chains]
+    if any(child is None or not valid_polygon(child, min_edge_length, min_area_twice)
+           for child in inset):
+        return []
+    return inset
+
+
 APP_VERSION = "1.8.4-debug"
 DEFAULT_CANVAS_W = 1200
 DEFAULT_CANVAS_H = 1697
@@ -2435,6 +2558,20 @@ class CanvasView(QGraphicsView):
             lines.append((panel.mapToScene(a), panel.mapToScene(b)))
         return lines
 
+    def _chord_split_preview_cells(self, state=None):
+        state = state or self._panel_split_preview
+        if not state or state.get("kind") != "chord":
+            return []
+        panel = state["panel"]
+        editor = self.window()
+        gap = float(editor.panel_split_gap_spin.value()) if hasattr(editor, "panel_split_gap_spin") else 24.0
+        raw_cells = split_polygon_chord(
+            panel.corner_points(), *state["vertices"], gap=gap,
+            min_edge_length=PanelItem.MIN_EDGE_LENGTH,
+            min_area_twice=PanelItem.MIN_PANEL_SIZE**2,
+        )
+        return [[QPointF(x, y) for x, y in cell] for cell in raw_cells]
+
     def _panel_split_preview_valid(self):
         state = self._panel_split_preview
         if state is None or state["scene"] is not self.scene():
@@ -2442,6 +2579,8 @@ class CanvasView(QGraphicsView):
         panel = state["panel"]
         if panel.scene() is not state["scene"] or not panel.isSelected():
             return False
+        if state.get("kind") == "chord":
+            return bool(self._chord_split_preview_cells(state))
         editor = self.window()
         direction, count = state["direction"], state["count"]
         gap = float(editor.panel_split_gap_spin.value()) if hasattr(editor, "panel_split_gap_spin") else 24.0
@@ -2467,20 +2606,39 @@ class CanvasView(QGraphicsView):
         pen.setCosmetic(True)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
-        for a, b in self._split_preview_lines(panel, state["direction"], state["count"]):
-            painter.drawLine(a, b)
+        if state.get("kind") == "chord":
+            pts = panel.corner_points()
+            first, second = state["vertices"]
+            painter.drawLine(panel.mapToScene(pts[first]), panel.mapToScene(pts[second]))
+            if valid:
+                # Show the two actual gutter boundaries in addition to the
+                # selected cut's centerline (preview only).
+                thin = QPen(QColor("#ffd166"), 2, Qt.DotLine)
+                thin.setCosmetic(True)
+                painter.setPen(thin)
+                for cell in self._chord_split_preview_cells(state):
+                    painter.drawLine(panel.mapToScene(cell[0]), panel.mapToScene(cell[-1]))
+        else:
+            for a, b in self._split_preview_lines(panel, state["direction"], state["count"]):
+                painter.drawLine(a, b)
         painter.drawPolygon(QPolygonF([panel.mapToScene(p) for p in panel.corner_points()]))
 
     def _update_panel_split_status(self):
         state = self._panel_split_preview
         if state is None:
             return
-        side = "左右" if state["direction"] == "vertical" else "上下"
-        invalid = "" if self._panel_split_preview_valid() else "（分割不可：幅・隙間・形状を確認）"
-        self.window().statusBar().showMessage(
-            f"Ctrl+R: {side} {state['count']}分割 {invalid} / "
-            "マウス=方向  ホイール=分割数  左クリック=確定  Esc/右クリック=取消"
-        )
+        invalid = "" if self._panel_split_preview_valid() else "（切断線が外側／交差・隙間が大きい・形状が無効）"
+        if state.get("kind") == "chord":
+            self.window().statusBar().showMessage(
+                f"Ctrl+R: 選択した2頂点から分割 {invalid} / "
+                "左クリック=2分割  Esc/右クリック=取消  ホイール分割数は非対応"
+            )
+        else:
+            side = "左右" if state["direction"] == "vertical" else "上下"
+            self.window().statusBar().showMessage(
+                f"Ctrl+R: {side} {state['count']}分割 {invalid} / "
+                "マウス=方向  ホイール=分割数  左クリック=確定  Esc/右クリック=取消"
+            )
         self.viewport().update()
 
     def begin_panel_split(self):
@@ -2499,20 +2657,34 @@ class CanvasView(QGraphicsView):
             return False
         panel = panels[0]
         corners = panel.corner_points()
-        if len(corners) != 4:
-            editor.statusBar().showMessage("Ctrl+R: 多角形の2頂点分割はP4で対応", 3000)
+        n = len(corners)
+        if not editor._panel_shape_valid(corners):
+            editor.statusBar().showMessage("Ctrl+R: コマの形状が無効です", 3000)
             return False
-        if panel.corner_edit_enabled and set(panel._selected_corner_indices) in ({0, 2}, {1, 3}):
-            editor.statusBar().showMessage("Ctrl+R: 対角2頂点分割はP4で対応", 3000)
-            return False
-        if not editor._valid_panel_quad(corners):
-            editor.statusBar().showMessage("Ctrl+R: 無効な四角形のため分割不可", 3000)
+        chosen = sorted(panel._selected_corner_indices) if panel.corner_edit_enabled else []
+        if len(chosen) == 2 and (chosen[1]-chosen[0]) not in (1, n-1):
+            # Explicit nonadjacent vertices take precedence over automatic
+            # quad strips, including a diagonal pair on an existing quad.
+            self._panel_split_preview = {
+                "kind": "chord",
+                "scene": scene,
+                "panel": panel,
+                "vertices": tuple(chosen),
+            }
+            self.setCursor(Qt.CrossCursor)
+            self._update_panel_split_status()
+            return True
+        if n != 4:
+            editor.statusBar().showMessage(
+                "Ctrl+R: 多角形は編集ONで離れた2頂点をCtrl+クリックして選択してください", 3500
+            )
             return False
         preferred = editor.panel_split_layout.currentData() if hasattr(editor, "panel_split_layout") else "vertical"
         direction = preferred if preferred in ("vertical", "horizontal") else "vertical"
         count = editor.panel_split_count_spin.value() if hasattr(editor, "panel_split_count_spin") else 2
         cursor_local = self.viewport().mapFromGlobal(QCursor.pos())
         self._panel_split_preview = {
+            "kind": "strip",
             "scene": scene,
             "panel": panel,
             "anchor": panel.mapFromScene(self.mapToScene(cursor_local)),
@@ -2527,6 +2699,9 @@ class CanvasView(QGraphicsView):
         state = self._panel_split_preview
         if state is None:
             return
+        if state.get("kind") == "chord":
+            self._update_panel_split_status()
+            return
         panel = state["panel"]
         if panel.scene() is not self.scene() or not panel.isSelected():
             self.finish_panel_split(commit=False)
@@ -2540,7 +2715,7 @@ class CanvasView(QGraphicsView):
 
     def change_panel_split_count(self, steps):
         state = self._panel_split_preview
-        if state is None:
+        if state is None or state.get("kind") == "chord":
             return
         state["count"] = max(2, min(12, state["count"] + int(steps)))
         self._update_panel_split_status()
@@ -2559,6 +2734,12 @@ class CanvasView(QGraphicsView):
             self.window().statusBar().showMessage("Ctrl+R: 分割をキャンセルしました", 1600)
             return False
         editor = self.window()
+        if state.get("kind") == "chord":
+            # The existing freeform panel split core retains image, effects,
+            # transform and one Undo record. A successful preview was validated.
+            return bool(editor.split_selected_panel_by_chord(
+                state["panel"], state["vertices"]
+            ))
         if hasattr(editor, "panel_split_count_spin"):
             editor.panel_split_count_spin.setValue(state["count"])
         if hasattr(editor, "panel_split_layout"):
@@ -4964,6 +5145,7 @@ class MangaEditor(QMainWindow):
         split_shortcut_help = QLabel(
             "ショートカット Ctrl+R: 切断線プレビュー → マウスで左右/上下を選択 → "
             "ホイールで2～12分割 → 左クリックで確定（Escで中止）。"
+            "編集ONで非隣接の2頂点を選ぶと、2頂点を結んで切断します。"
         )
         split_shortcut_help.setWordWrap(True)
         nsplit_lay.addRow(split_shortcut_help)
@@ -7090,6 +7272,34 @@ class MangaEditor(QMainWindow):
             a.x() + (b.x() - a.x()) * float(t),
             a.y() + (b.y() - a.y()) * float(t),
         )
+
+    def split_selected_panel_by_chord(self, panel, chosen):
+        """Split selected N-gon/quad across exactly two nonadjacent vertices."""
+        scene = self.current_scene()
+        if (not isinstance(panel, PanelItem)
+                or panel.scene() is not scene or not panel.isSelected()
+                or not panel.corner_edit_enabled or len(chosen) != 2):
+            return False
+        gap = float(self.panel_split_gap_spin.value()) if hasattr(self, "panel_split_gap_spin") else 24.0
+        raw = split_polygon_chord(
+            panel.corner_points(), chosen[0], chosen[1], gap,
+            min_edge_length=PanelItem.MIN_EDGE_LENGTH,
+            min_area_twice=PanelItem.MIN_PANEL_SIZE**2,
+        )
+        if not raw:
+            self.statusBar().showMessage(
+                "2頂点分割不可: 切断線や隙間・形状を確認してください", 3000
+            )
+            return False
+        cells = [[QPointF(x, y) for x, y in polygon] for polygon in raw]
+        image_mode = (
+            self.panel_split_image_mode.currentData()
+            if hasattr(self, "panel_split_image_mode") else "keep_view"
+        )
+        return bool(self._split_freeform_panel(
+            panel, cells, f"2頂点から2分割（隙間 {gap:g}px）",
+            image_mode=image_mode,
+        ))
 
     def _selected_panel_edge_index(self, panel):
         indices = set(getattr(panel, "_selected_corner_indices", set()))

@@ -136,3 +136,52 @@ Release after each verified batch if useful; never mark a batch complete based s
 - Quad-specific parallel snap and old quad N-split/grid/advanced split remain unchanged and are **guarded for N-gons**, not silently extrapolated; polygon chord splitting is P4.
 - Synthetic regression: `tests/test_panel_polygon.py`, including concave clipping, save/load, copy independence, invalid geometry, E insertion and G editing.
 - Manual Windows acceptance still needed: add 5/6+ vertices to an image panel; move into a concave polygon; save/reopen and Undo/Redo; verify effect overlays and PNG/ZIP clipping; ensure old quad N-split works. Do not mark P3 fully accepted without evidence.
+
+## P4 two-vertex polygon chord split — implementation / verification
+
+The selected edit mode now distinguishes **two nonadjacent vertices** from
+the existing quad automatic split:
+- Tab enables polygon vertex editing; Ctrl+click two nonadjacent vertices on the
+  **same selected panel**, then Ctrl+R enters **chord** preview. Diagonal pairs
+  on quads use the same chord logic. Quad panels without a nonadjacent pair
+  still use Ctrl+R mouse-direction/wheel strip splitting (P2).
+- Chord preview shows the exact vertex-to-vertex cut centerline. Orange means
+  valid; red means invalid (line outside the shape, crosses a boundary, or
+  selected gutter cannot safely fit). The actual two new gutter boundaries are
+  additionally previewed as dotted lines for valid cuts.
+- Left-click commits a single operation creating **exactly two** child
+  polygons with independent IDs, preserving panel rotation/scale, effects,
+  image reference and configured image-inheritance mode. Esc/right-click
+  cancels with no edits/history. Wheel is intentionally ignored in chord
+  mode; its repeated/multicut variant remains outside P4.
+- The existing normal N-split gap is applied **half on each side** of the chord.
+  For concave cases, only safe line-separable offsets are accepted with a
+  nonzero gutter. If not, the preview remains red; the user may reduce the
+  gutter to zero rather than lose parts of the artwork. A zero-gap chord is
+  supported for any otherwise valid simple polygon.
+- Pure geometry stays inline in app.py to preserve the single-file .py updater.
+  Invalid/chord-on-boundary/self-crossing/tiny child cuts are rejected before
+  mutating the scene; all final pieces are revalidated as simple polygons.
+
+### P4 tests / acceptance
+
+Automated: `tests/test_panel_chord_split.py` covers convex, odd-sided and
+concave polygons, reversed winding, strict boundary intersection rejection,
+exact gutter distance, too-large gutters, Ctrl+R selection and state,
+non-destructive previews, count-wheel isolation, save/reload outline,
+rotated/scaled children, one Undo transaction, cancel and page switch.
+
+Manual Windows GUI acceptance **pending**:
+1. Create a pentagon with E, select two nonadjacent handles with Ctrl+click,
+   press Ctrl+R and inspect yellow dashed cut plus two dotted gutter edges.
+2. Click to split; check two selectable panels, correct gap, original images/
+   effects and preserved visual alignment after rotation/scale.
+3. Check Esc/right-click cancellation; try X/G/wheel while chord preview active.
+4. Try a valid concave cut and an invalid chord through a notch; invalid
+   preview must be red and must never remove the original panel.
+5. Set gap to 0 or too-large, verify both extremes; Undo/Redo once restores
+   exactly the original polygon, save/reopen both resulting polygons.
+6. Verify ordinary quad Ctrl+R strip splitting remains available, with
+   mouse direction and wheel count unchanged.
+
+Status: code implemented, CI/manual acceptance to be recorded in Issue #5.
