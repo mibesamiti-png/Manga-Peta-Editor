@@ -7949,7 +7949,14 @@ class MangaEditor(QMainWindow):
         return scene.selectedItems() if scene else []
 
     def selection_changed(self):
-        items = self.selected()
+        # Qt may emit selectionChanged while destroying a page scene after
+        # window close. Its Python wrapper is no longer safe to inspect.
+        if getattr(self, "_closing", False):
+            return
+        try:
+            items = self.selected()
+        except RuntimeError:
+            return
         if not items:
             if hasattr(self, "selection_info_label"):
                 self.selection_info_label.setText("選択: なし")
@@ -9813,6 +9820,7 @@ class MangaEditor(QMainWindow):
     def closeEvent(self, event):
         if self._restarting_for_update:
             # handle_update_file() already wrote a fresh recovery checkpoint.
+            self._closing = True
             event.accept()
             return
 
@@ -9822,6 +9830,7 @@ class MangaEditor(QMainWindow):
 
         # User explicitly saved or chose to discard.
         self.clear_recovery_file()
+        self._closing = True
         event.accept()
 
 
