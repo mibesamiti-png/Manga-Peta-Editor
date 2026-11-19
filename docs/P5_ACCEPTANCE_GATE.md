@@ -28,6 +28,16 @@ CI: `python -m py_compile app.py`、`python scripts/check_project.py`、`QT_QPA_
 
 **注意**: オフスクリーン出力のデコード成功は、画像と重ね合わせの外観が期待どおりである保証ではない。
 
+## A2 — Qt GUI自動操作・描画QA（Windows runner）
+
+- `tests/test_gui_qtest.py`：`MangaEditor.show()` 後、`QTest` のマウスクリックとキーボード入力で選択、G数値移動/取消/確定、Ctrl+R可視プレビュー/分割、Shift+辺→E、Ctrl+頂点→2頂点分割を確認。
+- `viewport().grab()` の実レンダリング画像から橙破線をピクセル検出。合成赤画像の凹コマ切り抜きとグレースケール結果も画像値で検証。
+- 更新用.pyを Qt dragEnter/drop イベントとして配送し、`app.__file__` を**一時インストールのコピー**へ差し替えた状態で、置換・バックアップ・再起動予約のみ確認。OSプロセス再起動は行わない。
+- Windows CIが合成PNGを `manga-peta-synthetic-gui-qa` Artifactとして7日間保管。**非公開画像や私用プロジェクトは含まない**。
+- スクリーンショット検証は限定的なピクセル基準であり、ヒューマンGUI評価・画面倍率や実D&Dの完全代替ではない。
+
+**受入上の区別:** A/A2が成功しても、ユーザーPCでのWindows画面操作・実OSのD&Dと再起動・Effect外観などのBゲートは未実施のまま。安定版mainへはBゲートの評価後に統合する。
+
 ## B — Windows実機の検証手順（未実施）
 
 試験環境: Windows __、Python __、PySide6 __、画面 __×__、アプリの取得元HEAD __、実施者 __、日付 __。

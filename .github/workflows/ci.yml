@@ -9,6 +9,7 @@ on:
 jobs:
   static-check:
     runs-on: windows-latest
+    timeout-minutes: 8
     steps:
       - uses: actions/checkout@v4
 
@@ -24,7 +25,18 @@ jobs:
 
       - name: Project checks
         run: python scripts/check_project.py
-      - name: Canvas shortcut smoke tests
+      - name: GUI interaction and regression tests (synthetic/offscreen)
         env:
           QT_QPA_PLATFORM: offscreen
-        run: python -m unittest discover -s tests -p "test_*.py"
+          MPE_GUI_QA_OUTPUT: gui-qa-artifacts
+          PYTHONUNBUFFERED: "1"
+        run: python -m unittest discover -v -s tests -p "test_*.py"
+
+      - name: Upload synthetic GUI screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: manga-peta-synthetic-gui-qa
+          path: gui-qa-artifacts/*.png
+          if-no-files-found: ignore
+          retention-days: 7
