@@ -45,13 +45,22 @@ class GUIQTest(unittest.TestCase):
         self.editor.snap_check.setChecked(False)
         self.editor.corner_snap_check.setChecked(False)
         QApplication.processEvents()
-        # Unexpected modal message boxes hang headless Windows CI indefinitely.
-        # Turn them into a clear test failure instead of accepting their text.
+        # Flush the delayed startup recovery probe while using an empty sandbox
+        # recovery path, before later synthetic updater events touch it.
+        QTest.qWait(300)
+        # Unexpected modal dialogs should neither hang headless CI nor be
+        # silently ignored. Record them and fail tearDown after cleanup.
+        self._dialog_calls = []
+        real_message_box = app.QMessageBox
+
         def unexpected_dialog(*args, **kwargs):
-            raise AssertionError("Unexpected modal dialog in synthetic GUI test")
+            self._dialog_calls.append(str(args[1]) if len(args) > 1 else "dialog")
+            return real_message_box.No
+
         self._dialog_guard = patch.object(
             app, "QMessageBox",
             SimpleNamespace(
+                Yes=real_message_box.Yes, No=real_message_box.No,
                 information=unexpected_dialog, warning=unexpected_dialog,
                 critical=unexpected_dialog, question=unexpected_dialog,
             ),
@@ -66,6 +75,7 @@ class GUIQTest(unittest.TestCase):
         QApplication.processEvents()
         self._dialog_guard.stop()
         self.tmp.cleanup()
+        self.assertEqual(self._dialog_calls, [], "Unexpected GUI dialog in test")
 
     def add_panel(self, polygon=False, image=True):
         panel = PanelItem(
